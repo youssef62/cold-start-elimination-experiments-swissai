@@ -192,7 +192,7 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 |---|---|---|
 | default loader (mmap) |  | Really slow on Lustre |
 | `--weight-loader-disable-mmap` | One flag, 2.8x to 16x faster than default | - OOMs on large models (GLM-4.7), needed `num_threads=4` to fit<br>- Loads all weights per rank so scales badly with model size |
-| `--load-format fastsafetensors` | One flag, significant speedups | Doesn't work for multi-node yet; GLM-4.7 result needed a patched version<br>Scales badly with node number |
+| `--load-format fastsafetensors` | - One flag, significant speedups | Doesn't work for multi-node yet; GLM-4.7 result needed a patched version<br> - Scales badly with node count due to costly NCCL though Slingshot |
 | servekit | - Fastest across all models <br>- If model size scales linearly with node count, weight size loaded by node is constant and so is time (see LLama vs GLM4.7, 14s vs 16s)  | - Requires a costly prepare step that happens on first engine start<br>- Relies on `ShardedStateLoader`, which is not a mature path yet; a check with `servekit verify` is recommended to ensure correctness|
 - mention the difference i am seing between clariden and bristen. 
 - mention ShardedStateLoader limitations. 
