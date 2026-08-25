@@ -22,10 +22,17 @@ READY_TIMEOUT=9000
 MODELS_ROOT=/capstor/store/cscs/swissai/infra01/hf_models/models
 ARTIFACTS_ROOT=/capstor/store/cscs/swissai/infra01/cold-start-experiments
 
-# NOMMAP_THREADS caps --weight-loader-disable-mmap's read pool. Peak host memory
-# there is roughly 2 x shard x threads x 4 ranks per node, against 515 GB: each
-# worker does safetensors.torch.load(f.read()), holding a whole shard as bytes
-# and the tensors built from it. Only glm4.7's 7.2 GB shards need the cap.
+# Read here (not just below with RESULTS_DIR) because llama70b's NOMMAP_THREADS
+# default already needs it.
+CLUSTER="${CLUSTER:-bristen}"
+
+# NOMMAP_THREADS caps --weight-loader-disable-mmap's read pool (DEFAULT_NUM_THREADS
+# is 8 in sglang's loader). Bristen runs fine uncapped. On clariden, llama70b's
+# real weight_loader_disable_mmap default OOM-killed rank 1 mid weight-loading
+# (v0.5.10 didn't have this problem there, so it looks like a v0.5.16 loader
+# regression rather than a hardware ceiling); num_threads=1 avoided it but
+# nearly 3x slower than num_threads=4, which also passed clean. glm4.7's 7.2 GB
+# shards need the same cap for the analogous memory reason.
 case "${MODEL:?set MODEL, e.g. MODEL=llama70b}" in
   apertus8b)
     MODEL_PATH="${MODELS_ROOT}/swiss-ai/Apertus-8B-Instruct-2509"
@@ -39,7 +46,7 @@ case "${MODEL:?set MODEL, e.g. MODEL=llama70b}" in
     SERVED_MODEL_NAME=meta-llama/Llama-3.1-70B-Instruct
     ARTIFACT_ROOT="${ARTIFACTS_ROOT}/llama70b-tp4-sharded"
     NNODES=1 TP_SIZE=4 PP_SIZE=1 EP_SIZE=1
-    NOMMAP_THREADS="${NOMMAP_THREADS:-}"
+    [ "${CLUSTER}" = clariden ] && NOMMAP_THREADS="${NOMMAP_THREADS:-4}" || NOMMAP_THREADS="${NOMMAP_THREADS:-}"
     TIME_LIMIT=01:30:00 ;;
   # 92 layers split 23 per stage across PP=4; 160 routed experts split 40 per EP rank.
   glm4.7)
@@ -47,8 +54,15 @@ case "${MODEL:?set MODEL, e.g. MODEL=llama70b}" in
     SERVED_MODEL_NAME=zai-org/GLM-4.7
     ARTIFACT_ROOT="${ARTIFACTS_ROOT}/glm4.7-tp4pp4-sharded"
     NNODES=4 TP_SIZE=4 PP_SIZE=4 EP_SIZE=4
-    NOMMAP_THREADS="${NOMMAP_THREADS:-4}"
-    TIME_LIMIT=00:50:00 ;;
+    # 4 (bristen's working value) still OOM-killed every non-head rank on
+    # clariden; servekit-eval-glm4.7's own probing found num_threads=3 also
+    # OOM's there and num_threads=2 is the highest that reaches ready.
+    if [ "${CLUSTER}" = clariden ]; then NOMMAP_THREADS="${NOMMAP_THREADS:-2}"; else NOMMAP_THREADS="${NOMMAP_THREADS:-4}"; fi
+    # clariden's debug-qos caps a job at 90 node-minutes total; 4 nodes leaves
+    # 22 min each. Below what glm4.7's slowest bristen arms took (mmap ~20 min,
+    # fst ~115 min) but debug's queue is otherwise much faster than normal's;
+    # a slow arm timing out here just means resubmitting that one arm alone.
+    if [ "${CLUSTER}" = clariden ]; then TIME_LIMIT=00:22:00; else TIME_LIMIT=00:50:00; fi ;;
   *) echo "unknown MODEL: ${MODEL} (apertus8b|llama70b|glm4.7)" >&2; return 1 2>/dev/null || exit 1 ;;
 esac
 
@@ -67,7 +81,6 @@ fi
 
 # Results live under results/<cluster>-<model>: the same model on bristen and on
 # clariden are different measurements, not two runs of one.
-CLUSTER="${CLUSTER:-bristen}"
 RESULTS_DIR="results/${CLUSTER}-${MODEL}"
 
 # Slurm account names differ per cluster; the #SBATCH lines can't read this, so
@@ -79,9 +92,16 @@ RESULTS_DIR="results/${CLUSTER}-${MODEL}"
 # 'flash_ops'), well after the weight-loading phase this sweep measures.
 # flashinfer is the working fallback; pinned for every arm so a cluster's
 # arms stay comparable to each other.
+# MEM_MB=0 leaves --mem out of the sbatch call (bristen's default already
+# grants a full exclusive node); clariden needs an explicit value under its
+# cluster-wide MaxMemPerNode=850000, just below the node's actual 870000.
+#
+# clariden's debug-qos caps a job at MaxTRESMinsPerJob=node=90 (1.5 node-hours
+# total); glm4.7's TIME_LIMIT above is already capped to fit that at 4 nodes.
 ATTN_BACKEND_FLAG=""
+MEM_MB=0
 case "${CLUSTER}" in
   bristen)  ACCOUNT=a-infra02 PARTITION=normal ;;
-  clariden) ACCOUNT=infra02   PARTITION=debug
+  clariden) ACCOUNT=infra02   PARTITION=debug   MEM_MB=850000
             ATTN_BACKEND_FLAG="--attention-backend flashinfer" ;;
 esac

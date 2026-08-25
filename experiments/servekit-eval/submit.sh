@@ -22,12 +22,23 @@ case "${arm}" in
 esac
 
 # --nodes, --time and --job-name go here because #SBATCH lines cannot read models.sh.
+#
+# --exclusive on clariden still capped a job at ReqMem=450G despite the node
+# having 870G, which OOM-killed nommap's rank 1 mid weight-loading; MEM_MB is
+# the per-cluster fix, sourced from models.sh same as ACCOUNT/PARTITION. Left
+# unset (0) on bristen, whose exclusive default already worked before this fix.
+mem_flag=()
+if [ "${MEM_MB}" != "0" ]; then
+  mem_flag=(--mem="${MEM_MB}")
+fi
+
 exec sbatch \
   --job-name="${MODEL}-${arm}" \
   --nodes="${NNODES}" \
   --time="${TIME_LIMIT}" \
   --account="${ACCOUNT}" \
   --partition="${PARTITION}" \
+  "${mem_flag[@]}" \
   --output="${here}/${RESULTS_DIR}/%x-%j.out" \
   --export="ALL,MODEL=${MODEL},ARM=${export_arm:-${arm}}" \
   "$@" "${here}/${script}"

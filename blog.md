@@ -175,16 +175,30 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 
 | Loader | Apertus-8B-Instruct-2509 | Llama-3.1-70B-Instruct | GLM-4.7 |
 |---|---|---|---|
-| default loader (mmap) | 78.0 (1.0x) | 737.0 (1.0x) | 827.9 (1.0x) |
-| -`-weight-loader-disable-mmap` | 9.5 (8.2x) | 46.0 (16.0x) | 294.9 (2.8x, num_threads=4) |
-| `--load-format fastsafetensors` | 17.9 (4.4x) | 61.3 (12.0x) | 143.8 (5.8x) |
-| servekit (shm, no overlap) | 3.3 + 2.0 (14.6x) | 9.3 + 14.2 (31.3x) | 10.6 + 16.4 (30.7x) |
-| **servekit (shm, overlap)** | **2.1 (36.5x)** | **14.3 (51.5x)** | **16.2 (51.1x)** |
+| default loader (mmap) | 78.0 | 737.0 | 827.9 |
+| -`-weight-loader-disable-mmap` | 9.5 | 46.0 | 294.9 (num_threads=4) |
+| `--load-format fastsafetensors` | 17.9 | 61.3 | 143.8 |
+| servekit (shm, no overlap) | 3.3 + 2.0 | 9.3 + 14.2 | 10.6 + 16.4 |
+| **servekit (shm, overlap)** | **2.1** | **14.3** | **16.2** |
 
  
-* `-weight-loader-disable-mmap` ooms on GLM-4.7, so we had to reduce the number of threads to 4.
+* `-weight-loader-disable-mmap` ooms on GLM-4.7, so we had to reduce the number of threads to 4 on bristen and 2 on clariden. Similary, it ooms on Llama-3.1-70B-Instruct on clariden, so we had to reduce the number of threads to 4. 
 * `fastsafetensors` does not work for multi-node currently, the reported result for GLM4.7 is a patched version. 
 
+**Weight loading time (s) on Clariden**
+
+| Loader | Apertus-8B-Instruct-2509 | Llama-3.1-70B-Instruct | GLM-4.7 |
+|---|---|---|---|
+| default loader (mmap) | 92.8 | 794.2 | 861.6 |
+| `--weight-loader-disable-mmap` | 4.5 | 27.8 (num_threads=4) | 263.7 (num_threads=2) |
+| `--load-format fastsafetensors` | 11.9 | 48.6 | 113.8 |
+| servekit (shm, no overlap) | 1.1 + 0.9 | 5.1 + 6.0 | 40.8 + 6.5 |
+| **servekit (shm, overlap)** | **0.9** | **6.0** | **6.7** |
+
+* Same story as Bristen: `servekit (shm, overlap)` wins across every model size, and the win does not shrink as models grow.
+* Clariden's current driver/CUDA stack cannot load SGLang v0.5.16's default FA3 attention kernel (`sgl_kernel` raises `ImportError: cannot import name 'flash_ops'`, well after weight loading finishes). Every arm above runs with `--attention-backend flashinfer` instead, so the loader comparison stays apples-to-apples within Clariden even though it isn't the engine default. An older image, `lmsysorg/sglang:v0.5.10`, loads FA3 fine on the same hardware -- this looks like a regression in `v0.5.16`'s bundled kernel against Clariden's driver, not a Hopper/GH200 limitation.
+* The `--weight-loader-disable-mmap` thread caps above were found empirically on Clariden: Bristen's working `num_threads=4` OOM-killed Llama-3.1-70B's and GLM-4.7's non-head ranks there. Llama-3.1-70B still passes at `num_threads=4` (a lower `num_threads=1` also works, but is 3x slower); GLM-4.7 needed `num_threads=2` (`3` already OOMs). The same flag, uncapped, ran clean on this Clariden node under `v0.5.10` -- another sign this is a loader memory regression between SGLang versions rather than a hardware ceiling.
+* servekit (no overlap)'s stage time was noisy on Clariden: GLM-4.7's no-overlap stage read the exact same artifact bytes 10 seconds after the overlap run had already read them, at 7x lower throughput (4 GB/s vs 27 GB/s). The code path is identical either way -- `overlap` only changes whether the stage runs on a background thread alongside engine startup or synchronously before it -- so this reads as Capstor-side contention from other users' jobs, not something the overlap flag itself does.
 
 **Limitations** 
 
@@ -205,8 +219,9 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 | `--weight-loader-disable-mmap` | One flag, 2.8x to 16x faster than default | - OOMs on large models (GLM-4.7), needed `num_threads=4` to fit<br>- Loads all weights per rank so scales badly with model size |
 | `--load-format fastsafetensors` | - One flag, significant speedups | Doesn't work for multi-node yet; GLM-4.7 result needed a patched version<br> - Scales badly with node count due to costly NCCL though Slingshot |
 | servekit | - Fastest across all models <br>- If model size scales linearly with node count, weight size loaded by node is constant and so is time (see LLama vs GLM4.7, 14s vs 16s)  | - Requires a costly prepare step that happens on first engine start<br>- Relies on `ShardedStateLoader`, which is not a mature path yet; a check with `servekit verify` is recommended to ensure correctness|
-- mention the difference i am seing between clariden and bristen. 
-- mention ShardedStateLoader limitations. 
+
+## JIT Compilation
+
 
 
 [^1]: A threadpool of size 8 is used to do mmap in parallel. 

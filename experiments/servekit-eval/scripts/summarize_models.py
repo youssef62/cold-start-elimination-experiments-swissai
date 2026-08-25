@@ -2,18 +2,24 @@
 
 summarize_sweep.py answers "which loader wins for this model". This answers
 "does the win hold as the model grows", which is the whole reason the sweep runs
-three of them. Speedups are always against that column's own mmap baseline, so a
-column is self-contained and columns stay comparable to each other.
+three of them.
 
     summarize_models.py results/bristen-apertus8b results/bristen-llama70b ...
 
-Each directory is one column, labelled with the model name its jobs are prefixed
-with -- the part of the directory name after the cluster.
+Each directory is one column, labelled with the model's full checkpoint name via
+MODEL_NAMES; model_of() gets the slug (the part of the directory name after the
+cluster, also the job name prefix) that collect() needs to find its runs.
 """
 import sys
 from pathlib import Path
 
 from summarize_sweep import ARMS, LABELS, collect, cost_of
+
+MODEL_NAMES = {
+    "apertus8b": "Apertus-8B-Instruct-2509",
+    "llama70b": "Llama-3.1-70B-Instruct",
+    "glm4.7": "GLM-4.7",
+}
 
 
 def model_of(path):
@@ -21,8 +27,8 @@ def model_of(path):
     return Path(path).name.split("-", 1)[1]
 
 
-def cell(row, base, value, ratio_of):
-    """`value(row)` with its speedup against the column's baseline, or "-".
+def cell(row, value):
+    """`value(row)`, or "-".
 
     Any qualifier the per-model summary would have put in the row label goes in
     the cell instead: here the label is shared across columns, and a cap that
@@ -36,17 +42,10 @@ def cell(row, base, value, ratio_of):
         return "-"
     # " (num_threads=4)" -> "num_threads=4"
     note = row.get("label_suffix", "").strip().strip("()")
-    b = ratio_of(base) if base is not None else None
-    r = ratio_of(row)
-    parts = []
-    if b and r:
-        parts.append("%.1fx" % (b / r))
-    if note:
-        parts.append(note)
-    return "%s (%s)" % (v, ", ".join(parts)) if parts else "%s" % v
+    return "%s (%s)" % (v, note) if note else "%s" % v
 
 
-def table(title, columns, value, ratio_of):
+def table(title, columns, value):
     print("### %s" % title)
     print()
     print("| loader | %s |" % " | ".join(m for m, _ in columns))
@@ -54,9 +53,7 @@ def table(title, columns, value, ratio_of):
     for arm in ARMS:
         cells = []
         for _, rows in columns:
-            row = rows.get(arm)
-            base = rows.get("mmap")
-            cells.append(cell(row, base, value, ratio_of))
+            cells.append(cell(rows.get(arm), value))
         # An arm no model ran is noise, not a result.
         if all(c == "-" for c in cells):
             continue
@@ -78,12 +75,12 @@ def main(dirs):
     columns = []
     for d in dirs:
         model = model_of(d)
-        columns.append((model, dict((r["arm"], r) for r in collect(d, model))))
+        display = MODEL_NAMES.get(model, model)
+        columns.append((display, dict((r["arm"], r) for r in collect(d, model))))
 
-    table("Weight loading (s), stage + load", columns, weight_cost, cost_of)
+    table("Weight loading (s), stage + load", columns, weight_cost)
     table("Total cold start (s)", columns,
-          lambda r: "%.1f" % r["total"] if r.get("total") else None,
-          lambda r: r.get("total"))
+          lambda r: "%.1f" % r["total"] if r.get("total") else None)
 
     print("### Correctness and throughput")
     print()
