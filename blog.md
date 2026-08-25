@@ -181,9 +181,6 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 | servekit (shm, no overlap) | 3.3 + 2.0 | 9.3 + 14.2 | 10.6 + 16.4 |
 | **servekit (shm, overlap)** | **2.1** | **14.3** | **16.2** |
 
- 
-* `-weight-loader-disable-mmap` ooms on GLM-4.7, so we had to reduce the number of threads to 4 on bristen and 2 on clariden. Similary, it ooms on Llama-3.1-70B-Instruct on clariden, so we had to reduce the number of threads to 4. 
-* `fastsafetensors` does not work for multi-node currently, the reported result for GLM4.7 is a patched version. 
 
 **Weight loading time (s) on Clariden**
 
@@ -195,10 +192,11 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 | servekit (shm, no overlap) | 1.1 + 0.9 | 5.1 + 6.0 | 40.8 + 6.5 |
 | **servekit (shm, overlap)** | **0.9** | **6.0** | **6.7** |
 
-* Same story as Bristen: `servekit (shm, overlap)` wins across every model size, and the win does not shrink as models grow.
-* Clariden's current driver/CUDA stack cannot load SGLang v0.5.16's default FA3 attention kernel (`sgl_kernel` raises `ImportError: cannot import name 'flash_ops'`, well after weight loading finishes). Every arm above runs with `--attention-backend flashinfer` instead, so the loader comparison stays apples-to-apples within Clariden even though it isn't the engine default. An older image, `lmsysorg/sglang:v0.5.10`, loads FA3 fine on the same hardware -- this looks like a regression in `v0.5.16`'s bundled kernel against Clariden's driver, not a Hopper/GH200 limitation.
-* The `--weight-loader-disable-mmap` thread caps above were found empirically on Clariden: Bristen's working `num_threads=4` OOM-killed Llama-3.1-70B's and GLM-4.7's non-head ranks there. Llama-3.1-70B still passes at `num_threads=4` (a lower `num_threads=1` also works, but is 3x slower); GLM-4.7 needed `num_threads=2` (`3` already OOMs). The same flag, uncapped, ran clean on this Clariden node under `v0.5.10` -- another sign this is a loader memory regression between SGLang versions rather than a hardware ceiling.
-* servekit (no overlap)'s stage time was noisy on Clariden: GLM-4.7's no-overlap stage read the exact same artifact bytes 10 seconds after the overlap run had already read them, at 7x lower throughput (4 GB/s vs 27 GB/s). The code path is identical either way -- `overlap` only changes whether the stage runs on a background thread alongside engine startup or synchronously before it -- so this reads as Capstor-side contention from other users' jobs, not something the overlap flag itself does.
+
+ 
+* `-weight-loader-disable-mmap` ooms on GLM-4.7, so we had to reduce the number of threads to 4 on bristen and 2 on clariden. Similary, it ooms on Llama-3.1-70B-Instruct on clariden, so we had to reduce the number of threads to 4. 
+* `fastsafetensors` does not work for multi-node currently, the reported result for GLM4.7 is a patched version. 
+
 
 **Limitations** 
 
