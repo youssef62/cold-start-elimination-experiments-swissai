@@ -1,0 +1,47 @@
+# Apertus-8B / Llama-3.1-70B / GLM-4.7 on bristen, sglang v0.5.16.
+#
+# A released image is enough here: servekit main loads its artifact with
+# --load-format sharded_state, which is in-tree, so no presharded overlay is
+# needed and every arm can share one image.
+image = "lmsysorg/sglang:v0.5.16"
+
+mounts = [
+  "/capstor:/capstor",
+  "/iopsstor:/iopsstor",
+]
+
+workdir = "/iopsstor/scratch/cscs/yboughizane/cold-start-elimination-experiments-swissai/experiments/servekit-eval"
+
+[env]
+# Container-local HOME: the HF/Triton/pip caches fall back under here and live
+# in the ephemeral overlay, so every run is a genuine cold start.
+HOME = "/root"
+NCCL_DEBUG = "WARN"
+PYTHONPATH = ""
+PYTHONNOUSERSITE = "1"
+HF_HUB_OFFLINE = "1"
+TRANSFORMERS_OFFLINE = "1"
+TOKENIZERS_PARALLELISM = "false"
+
+# Slingshot tunables for multi-node: the aws_ofi_nccl hook supplies the CXI data
+# path, these bind the bootstrap sockets to the high-speed NIC and size the CXI
+# queues for cross-node pipeline P2P. FI_MR_CACHE_MONITOR=userfaultfd replaces
+# the default monitor, which mishandles CXI-registered memory.
+NCCL_NET = "AWS Libfabric"
+NCCL_SOCKET_IFNAME = "hsn0"
+GLOO_SOCKET_IFNAME = "hsn0"
+NCCL_CROSS_NIC = "1"
+FI_CXI_DISABLE_HOST_REGISTER = "1"
+FI_CXI_DEFAULT_CQ_SIZE = "131072"
+FI_CXI_RDZV_THRESHOLD = "0"
+FI_CXI_RDZV_GET_MIN = "0"
+FI_MR_CACHE_MONITOR = "userfaultfd"
+
+[annotations]
+com.pyxis.entrypoint_log = "true"
+com.hooks.aws_ofi_nccl.enabled = "true"
+com.hooks.aws_ofi_nccl.variant = "cuda12"
+# The hook's default netstack, shs:13.1.0, was repointed at a ROCm build on
+# 2026-08-18 and no longer ships libnccl-net.so, so container start fails. Pin
+# the CUDA artifact the symlink used to resolve to.
+com.hooks.netstack.name = "gpu:cuda13,cxi:13.1.0,ofi:2.6.0,aws:1.20.0+dl"
