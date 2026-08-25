@@ -1,5 +1,16 @@
 # Cold Start Elimination for SwissAI Model Launch
 
+<p align="center">
+  <img src="assets/epfl-ai-center-logo.png" alt="EPFL AI Center" height="50">
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/swiss-ai-logo.png" alt="Swiss AI Initiative" height="50">
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/easl-logo.png" alt="ETH EASL" height="50">
+</p>
+
+*This work was conducted as a summer internship at the EPFL AI Center, with supervision from Xiaozhe Yao.*
+
+
 Access to LLMs is crucial for academic research, be it for AI research, model testing or data annotation. For this reason, the SwissAI initiative operates an LLM serving platform on top of CSCS's Alps Clusters using [OpenTela](https://about.yao.sh/posts/opentela-swissai/) to pool together serving instances of multiple users in a decentralized manner and [SML](https://github.com/swiss-ai/model-launch) to seamlessly spin up nodes on top of `slurm` or CSCS's FireCrest. However, the current model launch suffers from large cold start times, which can be a bottleneck for research and development. In fact, an SGlang or VLLM server must first go through many costly steps before it can serve requests, including loading the model weights to GPU memory, computing CUDA Graphs, compiling JIT kernels and initializing NCCL communication. This can take tens of minutes for large models. 
 
 In this blog post, we will discuss the cold start elimination experiments conducted for the SwissAI model launch and the results obtained. Our findings culminate in a package for fast cold starts on HPC clusters: [servekit](https://github.com/eth-easl/servekit). 
