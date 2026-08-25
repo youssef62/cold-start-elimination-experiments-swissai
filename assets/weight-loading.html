@@ -1,0 +1,378 @@
+<title>Weight loading: mmap → shard → GPU</title>
+<style>
+  :root {
+    --paper: #f6f7f4;
+    --ink: #1b201a;
+    --ink-soft: #565f56;
+    --line: #d7dbd1;
+    --panel: #eef0e9;
+    --host: #2f6b73;
+    --host-soft: #e4eeee;
+    --fault: #b5651d;
+    --fault-soft: #f6e8d8;
+    --code-bg: #eceee6;
+  }
+  :root[data-theme="dark"] {
+    --paper: #12140f;
+    --ink: #e7e9e1;
+    --ink-soft: #9aa294;
+    --line: #33362c;
+    --panel: #1a1d16;
+    --host: #6fc2cb;
+    --host-soft: #17282a;
+    --fault: #e2a25c;
+    --fault-soft: #2c2011;
+    --code-bg: #1c1f17;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #12140f;
+      --ink: #e7e9e1;
+      --ink-soft: #9aa294;
+      --line: #33362c;
+      --panel: #1a1d16;
+      --host: #6fc2cb;
+      --host-soft: #17282a;
+      --fault: #e2a25c;
+      --fault-soft: #2c2011;
+      --code-bg: #1c1f17;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.55;
+  }
+
+  main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  code, .mono {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.86em;
+  }
+
+  header {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 28px;
+  }
+
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 30px;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  h1 .mono {
+    color: var(--host);
+    font-weight: 500;
+  }
+
+  .abstract {
+    max-width: 62ch;
+    color: var(--ink-soft);
+    font-size: 15.5px;
+  }
+
+  h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--ink-soft);
+    margin: 0 0 4px;
+    font-weight: 650;
+  }
+
+  figure {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .diagram-wrap {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px;
+    overflow-x: auto;
+  }
+
+  svg { display: block; width: 100%; height: auto; min-width: 720px; }
+
+  figcaption {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    max-width: 68ch;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+  .legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .swatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 2px;
+    display: inline-block;
+  }
+
+  .note {
+    border-left: 3px solid var(--fault);
+    background: var(--fault-soft);
+    border-radius: 0 6px 6px 0;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .note .label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fault);
+    font-weight: 700;
+  }
+  .note p {
+    margin: 0;
+    font-size: 14.5px;
+  }
+  .note p + p { margin-top: 2px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  thead th {
+    text-align: left;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+    font-weight: 650;
+    padding: 0 12px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  tbody td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.loc { color: var(--host); white-space: nowrap; }
+  td.stage { font-weight: 600; white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+
+  footer {
+    font-size: 12px;
+    color: var(--ink-soft);
+    border-top: 1px solid var(--line);
+    padding-top: 18px;
+  }
+</style>
+
+<main>
+
+  <header>
+    <div class="eyebrow">sglang · model_loader · default mmap path</div>
+    <h1>Weight loading: <span class="mono">mmap</span> → shard → GPU</h1>
+    <p class="abstract">
+      What actually happens between <span class="mono">safetensors_weights_iterator</span> yielding a tensor
+      and a sharded parameter landing on the GPU — and where the "pinned buffer" intuition breaks down.
+    </p>
+  </header>
+
+  <section style="display:flex; flex-direction:column; gap:16px;">
+    <h2>Pipeline</h2>
+    <figure>
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 780 640" role="img" aria-label="Diagram showing a weight tensor moving from an mmap'd safetensors file, through load_weights and weight_loader, narrowed to a TP shard as a lazy view, then materialized and copied to the GPU via a synchronous unpinned host-to-device memcpy triggered by the first page fault, then looping to the next parameter.">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+            </marker>
+            <marker id="arrowFault" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--fault)"/>
+            </marker>
+          </defs>
+
+          <!-- Zone background -->
+          <rect x="16" y="44" width="616" height="572" rx="6" fill="var(--host-soft)" stroke="var(--host)" stroke-opacity="0.35"/>
+          <text x="32" y="30" font-size="12" letter-spacing="0.06em" fill="var(--host)" font-weight="700">HOST — CPU VIRTUAL MEMORY (lazy views, no bytes moved)</text>
+
+          <!-- A: disk file -->
+          <rect x="52" y="70" width="220" height="54" rx="5" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+          <text x="162" y="92" text-anchor="middle" font-size="12.5" fill="currentColor" font-weight="600">model-0000N.safetensors</text>
+          <text x="162" y="108" text-anchor="middle" font-size="11" fill="var(--ink-soft)" class="mono">on disk</text>
+
+          <line x1="162" y1="124" x2="162" y2="150" stroke="currentColor" marker-end="url(#arrow)"/>
+          <text x="176" y="140" font-size="11" fill="var(--ink-soft)" class="mono">safe_open()</text>
+
+          <!-- B: mmap -->
+          <rect x="52" y="152" width="220" height="54" rx="5" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+          <text x="162" y="174" text-anchor="middle" font-size="12.5" fill="currentColor" font-weight="600">mmap'd region</text>
+          <text x="162" y="190" text-anchor="middle" font-size="11" fill="var(--ink-soft)">no read yet</text>
+
+          <line x1="162" y1="206" x2="162" y2="232" stroke="currentColor" marker-end="url(#arrow)"/>
+          <text x="178" y="222" font-size="11" fill="var(--ink-soft)" class="mono">get_tensor(name)</text>
+
+          <!-- C: cpu view -->
+          <rect x="52" y="234" width="220" height="54" rx="5" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+          <text x="162" y="256" text-anchor="middle" font-size="12.5" fill="currentColor" font-weight="600">CPU tensor</text>
+          <text x="162" y="272" text-anchor="middle" font-size="11" fill="var(--ink-soft)">zero-copy view over mmap</text>
+
+          <line x1="162" y1="288" x2="162" y2="316" stroke="currentColor" marker-end="url(#arrow)"/>
+          <text x="178" y="306" font-size="11" fill="var(--ink-soft)" class="mono">yield name, weight</text>
+
+          <!-- D: loop -->
+          <rect x="42" y="318" width="290" height="58" rx="5" fill="var(--panel)" stroke="currentColor"/>
+          <text x="187" y="340" text-anchor="middle" font-size="12.5" fill="currentColor" font-weight="700">load_weights()</text>
+          <text x="187" y="358" text-anchor="middle" font-size="11" class="mono" fill="var(--ink-soft)">for name, loaded_weight in weights</text>
+
+          <line x1="332" y1="347" x2="374" y2="347" stroke="currentColor" marker-end="url(#arrow)"/>
+
+          <!-- E: dispatch -->
+          <rect x="376" y="318" width="256" height="58" rx="5" fill="var(--panel)" stroke="currentColor"/>
+          <text x="504" y="340" text-anchor="middle" font-size="12.5" fill="currentColor" font-weight="700">param.weight_loader()</text>
+          <text x="504" y="358" text-anchor="middle" font-size="11" fill="var(--ink-soft)">dispatched per-parameter</text>
+
+          <!-- branch down to narrow -->
+          <line x1="504" y1="376" x2="504" y2="404" stroke="currentColor" marker-end="url(#arrow)"/>
+          <text x="518" y="396" font-size="10.5" fill="var(--ink-soft)">if sharded (e.g. ColumnParallelLinear)</text>
+
+          <!-- F: narrow -->
+          <rect x="376" y="406" width="256" height="58" rx="5" fill="none" stroke="currentColor" stroke-dasharray="4 3"/>
+          <text x="504" y="428" text-anchor="middle" font-size="12.5" fill="currentColor" font-weight="600" class="mono">.narrow(dim, start, shard_size)</text>
+          <text x="504" y="444" text-anchor="middle" font-size="11" fill="var(--ink-soft)">still a view — no I/O</text>
+
+          <line x1="504" y1="464" x2="504" y2="492" stroke="currentColor" marker-end="url(#arrow)"/>
+
+          <!-- G: trigger (copy_) -->
+          <rect x="376" y="494" width="256" height="66" rx="5" fill="var(--fault-soft)" stroke="var(--fault)" stroke-width="1.5"/>
+          <text x="504" y="518" text-anchor="middle" font-size="13" fill="var(--fault)" font-weight="700" class="mono">param_data.copy_(loaded_weight)</text>
+          <text x="504" y="536" text-anchor="middle" font-size="11" fill="var(--ink-soft)">first touch of these bytes</text>
+          <text x="504" y="550" text-anchor="middle" font-size="11" fill="var(--ink-soft)">on the mmap'd view</text>
+
+          <!-- G -> page cache -->
+          <path d="M 376 520 C 300 520 240 550 190 550" fill="none" stroke="var(--fault)" marker-end="url(#arrowFault)"/>
+          <text x="196" y="542" font-size="10.5" fill="var(--fault)">page fault</text>
+
+          <rect x="52" y="558" width="220" height="50" rx="5" fill="var(--fault-soft)" stroke="var(--fault)" stroke-dasharray="4 3"/>
+          <text x="162" y="578" text-anchor="middle" font-size="12" fill="currentColor" font-weight="600">page cache (RAM)</text>
+          <text x="162" y="594" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">only touched pages faulted in</text>
+
+          <!-- G -> off-diagram: H2D memcpy -->
+          <line x1="632" y1="527" x2="672" y2="527" stroke="var(--fault)" marker-end="url(#arrowFault)"/>
+          <text x="678" y="519" font-size="10.5" fill="var(--fault)">sync H2D</text>
+          <text x="678" y="532" font-size="10.5" fill="var(--fault)">memcpy to</text>
+          <text x="678" y="545" font-size="10.5" fill="var(--fault)">GPU param_data</text>
+          <text x="678" y="558" font-size="10.5" fill="var(--fault)">(unpinned src)</text>
+
+          <!-- loop back -->
+          <path d="M 376 527 C 300 527 40 500 40 347 L 42 347" fill="none" stroke="currentColor" marker-end="url(#arrow)"/>
+          <text x="46" y="470" font-size="10.5" fill="var(--ink-soft)">next (name, weight) pair</text>
+
+        </svg>
+      </div>
+      <figcaption>
+        One pass through the loop for a sharded parameter. Everything in the host zone left of the amber box is a lazy view — no file bytes have moved.
+        <span class="mono">copy_()</span> is the single point where reads actually happen: it triggers a page fault to bring the touched mmap pages into RAM,
+        and issues the host→device memcpy in the same call.
+      </figcaption>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--panel); border:1px solid currentColor;"></span>materialized / logic</span>
+        <span><span class="swatch" style="background:transparent; border:1px dashed currentColor;"></span>lazy view, no I/O</span>
+        <span><span class="swatch" style="background:var(--fault-soft); border:1px solid var(--fault);"></span>actual data movement</span>
+      </div>
+    </figure>
+  </section>
+
+  <section class="note">
+    <span class="label">Correction to the pinned-buffer intuition</span>
+    <p>
+      <span class="mono">param_data.copy_(loaded_weight)</span> where <span class="mono">loaded_weight</span> is an ordinary
+      (non-pinned) CPU tensor is a plain synchronous <span class="mono">cudaMemcpy</span>. PyTorch does not stage it through
+      an internal pinned bounce buffer automatically.
+    </p>
+    <p>
+      The mmap'd source pages are what's paged — so the copy itself can stall on page faults as it reads, not on GPU-side staging.
+      Pinned-memory staging only shows up where a loader path deliberately allocates and reuses a pinned tensor (some prefetch /
+      <span class="mono">fastsafetensors</span> paths do this) — not on this default <span class="mono">safetensors_weights_iterator</span> route.
+    </p>
+  </section>
+
+  <section style="display:flex; flex-direction:column; gap:14px;">
+    <h2>Stage → code</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Stage</th><th>Location</th><th>What it does</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="stage">mmap + view</td>
+            <td class="loc mono">weight_utils.py:1002</td>
+            <td><span class="mono">safetensors_weights_iterator</span> — <span class="mono">safe_open(..., device="cpu")</span> then <span class="mono">get_tensor()</span>, zero-copy per shard file.</td>
+          </tr>
+          <tr>
+            <td class="stage">loader entry</td>
+            <td class="loc mono">loader.py:375</td>
+            <td><span class="mono">DefaultModelLoader</span> — owns <span class="mono">_get_all_weights</span> (loader.py:703), which wraps the iterator.</td>
+          </tr>
+          <tr>
+            <td class="stage">model init</td>
+            <td class="loc mono">loader.py:314</td>
+            <td><span class="mono">_initialize_model</span> — constructs the <span class="mono">nn.Module</span> before any weight is loaded.</td>
+          </tr>
+          <tr>
+            <td class="stage">dispatch loop</td>
+            <td class="loc mono">llama.py:663</td>
+            <td><span class="mono">LlamaForCausalLM.load_weights</span> — matches names to params, calls each param's <span class="mono">weight_loader</span>.</td>
+          </tr>
+          <tr>
+            <td class="stage">shard + copy</td>
+            <td class="loc mono">linear.py:387</td>
+            <td><span class="mono">ColumnParallelLinear.weight_loader</span> — narrows to this rank's shard, then <span class="mono">param_data.copy_()</span>.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    sglang · youssef/sharded-state-pp worktree · default mmap loading path (no <span class="mono">disable_mmap</span>, no prefetch)
+  </footer>
+
+</main>
