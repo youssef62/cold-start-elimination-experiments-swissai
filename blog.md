@@ -221,6 +221,70 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 ## JIT Compilation
 
 
+## III. CUDA Graphs
+
+Cuda graphs capture a sequence of CUDA operations (kernel launches, memcpy, etc.) into a single graph of computation. For example, the following code snippet:
+
+```python
+def forward(x):
+  a = f(x)
+  b = g(a)
+``` 
+
+becomes the graph : `f --> g`. CUDA graphs are useful to reduce the overhead of kernel launches, especially for small kernels. In our case, cuda graphs take a significant amount of time to capture especially:
+* `piecewise_cuda_graph_capture` (79s) for prefill CUDA graphs. 
+* `cuda_graph_capture` (32s) for decode CUDA graphs. 
+
+The issue with CUDA graphs is that their nodes takes as argument **fixed device pointers** (pink pointers in the illustration below). This that in the example above, `f`'s node encodes x's **device pointer**. These virtual device addresses are cuda-context specific. This means that we cannot save the graphs to disk, and replay them in a different context. 
+
+> **Insight.** CUDA graphs cannot be saved to disk and reused across different contexts. 
+
+Multiple methods try to solve this issues. **Medusa** [^2] patches the CUDA graphs node to replace the fixed device pointers with a **virtual pointer**, using hand-written rules per kernel to rewrite addresses on restore. However, these patching rules are kernel-specific and break easily. They don't keep up with new kernels/libraries or non-uniform model architectures (e.g. dense+MoE).
+
+**Foundry [^3]** on the other hand, intercepts the memory allocation API and makes it return the same virtual addresses every run, so captured pointers stay valid with no per-kernel patching. However, it currently lacks TP support and doesn't capture prefill graphs (`piecewise_cuda_graph_capture`), which account for most of the CUDA graph capture time.
+
+Both these methods are at research stage and not ready for production-like environments, which is why we did not use them.
+<p align="center">
+  <img src="assets/cg-medusa.png" alt="Capturing a CUDA graph with PyTorch, the underlying kernels it launches, and the resulting captured CUDA graph" width="70%">
+  <br>
+  <sub>Source: <a href="https://dl.acm.org/doi/epdf/10.1145/3669940.3707285">Medusa: Accelerating Serverless LLM Inference with Materialization</a></sub>
+</p>
+
+
+## IV. CRIU
+
+<p align="center">
+  <img src="assets/criu-logo.png" alt="CRIU logo" height="80">
+</p>
+
+**CRIU** (checkpoint restore in user space) is a Linux utility that can checkpoint a running CPU process to disk and restore it later. 
+
+On the GPU side, NVIDIA offers **cuda-checkpoint**, a driver that checkpoints a CUDA context and all of its device memory to RAM. This means that 
+
+Combining these tools, we can first checkpoint all cuda contexts to RAM using `cuda-checkpoint`, then checkpoint the CPU process using CRIU. And voila, we have a checkpoint of the CPU and GPU. This technique is now natively integrated in a CRIU plugin: CRIU-gpu. 
+
+In our case, we want to checkpoint a warm SGLang server to disk and restore it later. This would allow us to cut off the elusive `piecewise_cuda_graph_capture` and `cuda_graph_capture` times, along with library imports `process_startup` and `tp_worker_spawn`. 
+
+Not, so fast. CRIU has one major limitation: it needs priviledges. It's least priviledged mode (`--unprivileged`), still requires:
+* `CAP_CHECKPOINT_RESTORE` and `CAP_SYS_PTRACE` capabilities on the CRIU binary. 
+* A container that does not have a syscall filter i.e with `Seccomp:0`. A non zero `seccomp` indicates a specific syscall filter and CRIU currently refuses to run in such containers.
+
+
+https://github.com/checkpoint-restore/criu/blob/criu-dev/Documentation/criu.txt
+
+
+On our CSCS clusters, we cannot obtain these capabilites. Moreover, the `enroot` containers commonly used for our SLURM jobs add a seccomp filter, which makes CRIU unusable. 
+
+> **Insight.** We cannot use CRIU on CSCS slurm clusters. 
+
+We still explore CRIU on our local machines for a complete assessment of the potential of this technique. 
+
+
+
 
 [^1]: A threadpool of size 8 is used to do mmap in parallel. 
+
+[^2]: [Medusa: Accelerating Serverless LLM Inference with Materialization](https://dl.acm.org/doi/epdf/10.1145/3669940.3707285)
+
+[^3]: [Foundry: Template-Based CUDA Graph Context Materialization for Fast LLM Serving Cold Start](https://arxiv.org/abs/2604.06664)
 
