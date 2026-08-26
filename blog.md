@@ -13,7 +13,7 @@
 
 Access to LLMs is crucial for academic research, be it for AI research, model testing or data annotation. For this reason, the SwissAI initiative operates an LLM serving platform on top of CSCS's Alps Clusters using [OpenTela](https://about.yao.sh/posts/opentela-swissai/) to pool together serving instances of multiple users in a decentralized manner and [SML](https://github.com/swiss-ai/model-launch) to seamlessly spin up nodes on top of `slurm` or CSCS's FireCrest. However, the current model launch suffers from large cold start times, which can be a bottleneck for research and development. In fact, an SGlang or VLLM server must first go through many costly steps before it can serve requests, including loading the model weights to GPU memory, computing CUDA Graphs, compiling JIT kernels and initializing NCCL communication. This can take tens of minutes for large models. 
 
-In this blog post, we will discuss the cold start elimination experiments conducted for the SwissAI model launch and the results obtained. Our findings culminate in a package for fast cold starts on HPC clusters: [servekit](https://github.com/eth-easl/servekit). 
+This post walks through the cold start elimination experiments for the SwissAI model launch: what we tried, what worked, and what didn't. We shipped what worked into a package called [<a href="https://github.com/eth-easl/servekit"><img src="https://cdn.simpleicons.org/github" height="14" style="vertical-align:-1px;margin-left:4px"></a> **Servekit 🧊 → 🔥**](https://github.com/eth-easl/servekit). <br>Servekit wraps sglang launches and cuts weight loading from minutes down to single-digit seconds with our lustre storage. CRIU and CUDA graph checkpointing on the other handboth hit walls we couldn't get around on our clusters. 
 
 ## Table of Contents
 
@@ -51,30 +51,35 @@ For this experiment, we use `Llama-3.1-70B-Instruct` served with SGLang v0.5.10 
 
 ## II. Weight Loading
 
-As we can see, loading weights from persistent storage (`capstor/store`) is by far the most time-consuming step, with **78%** of the total cold start time. **652.19** seconds for a 70B (130GB) model is a lot, that is **0.2GiB/s**. Capstor's aggregate theoretical bandwidth (across all users and jobs) is a whopping **1.19 TB/s**, and we are connected to it with **4 HPE Cray Slingshot-11 NICs** with a combined bandwidth of **4x23.28 GiB/s**. So we should definitely do better than **0.2GiB/s**. Let's understand why this happens.
+As we can see, loading weights from persistent storage (`capstor/store`) is by far the most time-consuming step, with **78%** of the total cold start time. **652.19** seconds for a 70B (130GB) model is a lot, that is **0.2GiB/s**. [Capstor's aggregate theoretical bandwidth](https://docs.cscs.ch/alps/storage/) (across all users and jobs) is a whopping **1.19 TB/s**, and we are connected to it with [4 HPE Cray Slingshot-11 NICs](https://docs.cscs.ch/alps/hardware/#alps-high-speed-network) with a combined bandwidth of **4x23.28 GiB/s**. So we should definitely do better than **0.2GiB/s**. Let's understand why this happens.
 
-https://docs.cscs.ch/alps/storage/
-https://docs.cscs.ch/alps/hardware/#alps-high-speed-network
 
+*Why is the default weight loader so slow in our setup?*
 
 ### 1. The default weight loader and mmap
 
-`mmap` is a system call that maps a virtual memory region to a file. That memory region will not be mapped to a physical memory region until it is accessed. When a `mmap`ed page is accessed for the first time, the kernel will realize that the virtual page does not have a corresponding physical page but is `mmap`ed to a file. So it will load the corresponding file page from disk to the page cache and then associate the virtual page with the page cache page. This is called a **major page fault**. On subsequent access, the virtual page is already mapped to a physical page in the page cache and no disk access is needed. This is called a **minor page fault**. [^1]
+The default SGLang loader uses `mmap` to load the weight files. 
 
+But what is `mmap`? `mmap` is a system call that maps a virtual memory region to a file. That memory region will not be mapped to a physical memory region until it is accessed. When a `mmap`ed page is accessed for the first time, the kernel will realize that the virtual page does not have a corresponding physical page but is `mmap`ed to a file. So it will load the corresponding file page from disk to the page cache and then associate the virtual page with the page cache page. This is called a **major page fault**. On subsequent access, the virtual page is already mapped to a physical page in the page cache and no disk access is needed. This is called a **minor page fault**. [^1]
 
-The default SGLang loader uses `mmap`! The `DefaultModelLoader` calls methods like `multi_thread_safetensors_weights_iterator`, which return an iterator over pairs (`tensor_name`, `tensor_weights`) where `tensor_weights` is a `mmap`ed tensor. This iterator is passed to `LlamaForCausalLM`, which passes each parameter (like `ColumnParallelLinear`) its tensor weights. The parameter will then get a view of its needed weights according to its rank (`tp_rank` in the case of `ColumnParallelLinear`) and will then initiate a host (CPU) to device (GPU) copy of the weights.
+Concretely, the `DefaultModelLoader` calls methods like `multi_thread_safetensors_weights_iterator`, which return an iterator over pairs (`tensor_name`, `tensor_weights`) where `tensor_weights` is a `mmap`'ed tensor. This iterator is passed to `LlamaForCausalLM`, which passes each parameter (like `ColumnParallelLinear`) its tensor weights. The parameter will then get a view of its needed weights according to its rank (`tp_rank` in the case of `ColumnParallelLinear`) and will then initiate a host (CPU) to device (GPU) copy of the weights.
 
 <p align="center">
   <img src="assets/weight-loading.png" alt="Weight loading: mmap to shard to GPU" width="50%">
 </p>
 
-This will trigger a **major page fault** for each tensor, which will be loaded from Lustre going through the network to the page cache and then copied to GPU. This is a very slow process, especially for large models with many tensors. We validate this by running the exact same experiment with sglang's `--weight-loader-disable-mmap`. We get **45.7s** for weight loading, which is **14x faster** than the default loader and corresponds to **2.8GiB/s**. 
+Our hypothesis is that this triggers a **major page fault** for each page touched, which gets loaded from Lustre going through the network to the page cache and then copied to GPU. This would be a very slow process, especially for large models with many tensors spread over many pages. 
+
+To check this, we run the exact same experiment with sglang's `--weight-loader-disable-mmap`, which skips `mmap` entirely. 
+
+We get **45.7s** for weight loading, which is **14x faster** than the default loader and corresponds to **2.8GiB/s**. 
 
 > **Insight.** For weight loading using an HDD-backed Lustre file system, using `mmap` is a bad idea. The simple `--weight-loader-disable-mmap` flag is a huge improvement.
 
 
-Let's also try another one-flag method that does not use `mmap`: `fastsafetensors` (`--load-format fastsafetensors`)
-partitions files across TP ranks; each TP process reads a file with `pread` and then exchanges the weights with other TP ranks using NCCL communication. Once all weights are on each GPU, tensors are parsed one by one directly in GPU memory. This eliminates the need for small tensor copies from host to device. We get **59.1s** for weight loading, which is **11x faster** than the default loader but worse than `--weight-loader-disable-mmap`. This confirms again that the bottleneck was `mmap` and not the small tensor copies from host to device.
+This still leaves another possible explanation: maybe it's not `mmap` itself but the many small host-to-device copies it causes. Let's try another one-flag method that does not use `mmap`: `fastsafetensors` (`--load-format fastsafetensors`) partitions files across TP ranks; each TP process reads a file with `pread` and then exchanges the weights with other TP ranks using NCCL communication. *Once all weights are on each GPU, tensors are parsed one by one directly in GPU memory*. This eliminates the need for small tensor copies from host to device. If the small copies were the real bottleneck, this should beat `--weight-loader-disable-mmap`.
+
+We get **59.1s** for weight loading, which is **11x faster** than the default loader but worse than `--weight-loader-disable-mmap`. This confirms again that the bottleneck was `mmap` and not the small tensor copies from host to device.
 
 
 | config | weight_loading (s) | speedup | total cold start (s) |
@@ -94,7 +99,11 @@ This is a huge improvement and shows that `mmap` is not suitable for weight load
 
 ### 2. Understanding the lustre data storage
 
-We will now try to see how fast we can load files with Lustre. Lustre is a distributed file system that saves files across different *Object Storage Targets (OSTs)*. Each OST is a storage volume that can be accessed independently. To increase the read bandwidth, we need to distribute the model weights across multiple OSTs so we can benefit from parallelism across OSTs. In our case, we will have each `.safetensors` file in a different OST. For models like `LLama-3.1-70B-Instruct`, there are 30 `.safetensors` files. 
+Let's set SGLang aside for a moment and ask a simpler question:  
+
+*Irrespective of SGLang, How fast can we load files from Lustre?*
+
+ Lustre is a distributed file system that saves files across different *Object Storage Targets (OSTs)*. Each OST is a storage volume that can be accessed independently. To increase the read bandwidth, we need to distribute the model weights across multiple OSTs so we can benefit from parallelism across OSTs. In our case, we will have each `.safetensors` file in a different OST. For models like `LLama-3.1-70B-Instruct`, there are 30 `.safetensors` files. 
 
 
 <p align="center">
@@ -293,8 +302,9 @@ We still explore CRIU on our local machines for a complete assessment of the pot
 
 ### Local results
 
-We tested checkpoint/restore on a local machine with 2x RTX 3060 GPUs (12GB each), using `Qwen2.5-3B-Instruct`, a model small enough to fit comfortably in 12GB of VRAM. We checkpointed a warm, already-serving SGLang server (CUDA graphs included) and restored it, trying two flavors of snapshot.
+We tested checkpoint/restore on a local machine with 2x RTX 3060 GPUs (12GB each), using `Qwen2.5-3B-Instruct`. We checkpointed a warm, already-serving SGLang server and restored it. 
 
+*Results with 1x RTX 3060, 12GB VRAM, 16GB RAM, Ubuntu 22.04, SGLang v0.5.10* 
 | path | time to serving | speedup vs cold start | checkpoint time | explanation |
 |---|---|---|---|---|
 | cold launch (weights + JIT compile) | 109.8s | 1x | — | |
@@ -304,9 +314,11 @@ We tested checkpoint/restore on a local machine with 2x RTX 3060 GPUs (12GB each
 To free and reload the weights for the thin snapshot, we use SGLang's `/release_memory_occupation` and `/resume_memory_occupation` HTTP endpoints, which let you drop and reload model weights (and KV cache) on a running server without restarting it. See the [SGLang docs](https://docs.sglang.io/docs/advanced_features/sglang_for_rl) for details.
 
 Getting a full SGLang server to checkpoint and restore cleanly, and to be **reusable** (restored from more than once), also required working around a few CRIU quirks:
-* **Semaphore**: SGLang creates a POSIX semaphore in `/dev/shm`. By default CRIU hard-links it into the live filesystem, which only survives one restore (the second restore's process deletes it on exit). We instead unlink the semaphore before dumping, so CRIU embeds its content directly in the snapshot and it can be restored as many times as needed.
-* **Log file size**: CRIU records the server's log file by path *and size*, and refuses to restore if that size changed (which it will, since the process keeps appending to it). We reset the log to its snapshot-time size before every restore.
-* **TCP connection**: CRIU normally preserves open TCP connections across dump/restore, but that needs a privilege (`CAP_NET_ADMIN`) we don't have. We instead tell CRIU to just close the connection (`--tcp-close`) — harmless here since it's only used for one-time process coordination during startup, not needed once the server is serving.
+* **Semaphore**: SGLang creates a POSIX semaphore in `/dev/shm`. By default CRIU prefers to not include the semaphore in the checkpoint, so it creates and saves a hard-link to it. However, this means that when one restore succeeds and tears down, it will clear the semaphore and it will be deleted from the filesystem. Without a semaphore in the filesystem anymore, the checkpoint becomes unusable for further restores. To solve this, we need to tell CRIU to include the semaphore in the checkpoint as a **ghost file** instead of a hard-link. We do this by unlinking the semaphore from `/dev/shm` before checkpointing, the inode stays alive as the SGLang process has an open file descriptor to it. CRIU includes unlinked files in the checkpoint as ghost files, to be sure it finds them on restore. 
+* **Log file size**: CRIU records the server's log file by path *and size*, and refuses to restore if that size changed (which it will, since the restored process keeps appending to it). We reset the log to its snapshot-time size before every restore. 
+* **TCP connection**: CRIU normally preserves open TCP connections across dump/restore, but that needs a privilege (`CAP_NET_ADMIN`) we don't have. We instead tell CRIU to just close the connection (`--tcp-close`). This is harmless in the **1 GPU case** as we do not use NCCL connections between GPUs. 
+
+
 
 
 
