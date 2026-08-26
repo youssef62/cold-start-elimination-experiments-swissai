@@ -279,6 +279,22 @@ On our CSCS clusters, we cannot obtain these capabilites. Moreover, the `enroot`
 
 We still explore CRIU on our local machines for a complete assessment of the potential of this technique. 
 
+### Local results
+
+We tested checkpoint/restore on a local machine with 2x RTX 3060 GPUs (12GB each), using `Qwen2.5-3B-Instruct`, a model small enough to fit comfortably in 12GB of VRAM. We checkpointed a warm, already-serving SGLang server (CUDA graphs included) and restored it, trying two flavors of snapshot.
+
+| path | time to serving | speedup vs cold start | checkpoint time | explanation |
+|---|---|---|---|---|
+| cold launch (weights + JIT compile) | 109.8s | 1x | — | |
+| naive restore | 23.3s | 4.72x | 34.7s (15GB snapshot) | Save everything, including the GPU weights. |
+| thin restore | 17.4s | 6.31x | 11.6s (4.6GB snapshot) | Free the model weights right before saving, then reload them from disk on restore. |
+
+To free and reload the weights for the thin snapshot, we use SGLang's `/release_memory_occupation` and `/resume_memory_occupation` HTTP endpoints, which let you drop and reload model weights (and KV cache) on a running server without restarting it. See the [SGLang docs](https://docs.sglang.io/docs/advanced_features/sglang_for_rl) for details.
+
+Getting a full SGLang server to checkpoint and restore cleanly, and to be **reusable** (restored from more than once), also required working around a few CRIU quirks:
+* **Semaphore**: SGLang creates a POSIX semaphore in `/dev/shm`. By default CRIU hard-links it into the live filesystem, which only survives one restore (the second restore's process deletes it on exit). We instead unlink the semaphore before dumping, so CRIU embeds its content directly in the snapshot and it can be restored as many times as needed.
+* **Log file size**: CRIU records the server's log file by path *and size*, and refuses to restore if that size changed (which it will, since the process keeps appending to it). We reset the log to its snapshot-time size before every restore.
+* **TCP connection**: CRIU normally preserves open TCP connections across dump/restore, but that needs a privilege (`CAP_NET_ADMIN`) we don't have. We instead tell CRIU to just close the connection (`--tcp-close`) — harmless here since it's only used for one-time process coordination during startup, not needed once the server is serving.
 
 
 
