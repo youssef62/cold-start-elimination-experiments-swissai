@@ -15,6 +15,18 @@ Access to LLMs is crucial for academic research, be it for AI research, model te
 
 In this blog post, we will discuss the cold start elimination experiments conducted for the SwissAI model launch and the results obtained. Our findings culminate in a package for fast cold starts on HPC clusters: [servekit](https://github.com/eth-easl/servekit). 
 
+## Table of Contents
+
+- [I. Time Breakdown](#i-time-breakdown)
+- [II. Weight Loading](#ii-weight-loading)
+  - [1. The default weight loader and mmap](#1-the-default-weight-loader-and-mmap)
+  - [2. Understanding the lustre data storage](#2-understanding-the-lustre-data-storage)
+  - [3. Fast weight loading with servekit](#3-fast-weight-loading-with-servekit)
+- [JIT Compilation](#jit-compilation)
+- [III. CUDA Graphs](#iii-cuda-graphs)
+- [IV. CRIU](#iv-criu)
+  - [Local results](#local-results)
+
 
 ## I. Time Breakdown
 
