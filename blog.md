@@ -81,16 +81,6 @@ This still leaves another possible explanation: maybe it's not `mmap` itself but
 
 We get **59.1s** for weight loading, which is **11x faster** than the default loader but worse than `--weight-loader-disable-mmap`. This confirms again that the bottleneck was `mmap` and not the small tensor copies from host to device.
 
-
-| config | weight_loading (s) | speedup | total cold start (s) |
-|---|---|---|---|
-| default loader | 453.7 | 1.0× | 629.8 |
-| nommap | 45.7 | 9.9× | 214.7 |
-| fastsafetensors  | 59.1 | 7.7× | 230.0 |
-
-
-lustre-loading-exp/results/meeting-sweep/bristen-2026-08-24-cpu128
-
 This is a huge improvement and shows that `mmap` is not suitable for weight loading on Lustre file systems. However, **2.8GiB/s** is still far from the theoretical maximum of **4x23.28 GiB/s**. Let's see if we can do better.
 
 - The no-mmap techniques are very sensitive to the number of CPUs. 
@@ -145,6 +135,8 @@ Equipped with this knowledge, we try the following:
     2. Implementation: the standard `--weight-loader-disable-mmap` has 8 threads by default, each running a `pread` on a file. If our files are big, this will overflow RAM. 
 
 
+*Weight loading experiments (s), Bristen*
+
 | config | weight_loading (s) | speedup | total cold start (s) |
 |---|---|---|---|
 | default loader | 453.7 | 1.0× | 629.8 |
@@ -156,7 +148,6 @@ Equipped with this knowledge, we try the following:
 
 * To avoid corrupting our results with any kind of caching, we run the methods in **reverse order** of expected speed and on different nodes, meaning `dev/shm + presharded + overlap` ran before the default loader experiment. 
 
-* 
 
 
 lustre-loading-exp/results/meeting-sweep/bristen-2026-08-24-cpu128
@@ -183,7 +174,7 @@ experiments/servekit-eval/results/results.md
 
 
 
-**Config**
+*Config*
 
 | | Apertus-8B-Instruct-2509 | Llama-3.1-70B-Instruct | GLM-4.7 |
 |---|---|---|---|
@@ -192,7 +183,7 @@ experiments/servekit-eval/results/results.md
 
 This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 
-**Weight loading time (s) on Bristen**
+*Weight loading time (s) on Bristen*
 
 | Loader | Apertus-8B-Instruct-2509 | Llama-3.1-70B-Instruct | GLM-4.7 |
 |---|---|---|---|
@@ -203,7 +194,7 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 | **servekit (shm, overlap)** | **2.1** | **14.3** | **16.2** |
 
 
-**Weight loading time (s) on Clariden**
+*Weight loading time (s) on Clariden*
 
 | Loader | Apertus-8B-Instruct-2509 | Llama-3.1-70B-Instruct | GLM-4.7 |
 |---|---|---|---|
@@ -219,27 +210,37 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 * `fastsafetensors` does not work for multi-node currently, the reported result for GLM4.7 is a patched version. 
 
 
-**Limitations** 
+**servekit's limitations**
 
 - Presharding the models implies a separate prepare step; `servekit` tries to simplify this by doing it automatically on the first run, so users don't need to worry about it. In fact, when running `servekit launch --servekit-artefact-path <path> python -m sglang.launch_server ...`, a presharded copy of the model is created in `<path>`. This causes a first run to be slower than the default loader. 
 - `ShardedStateLoader`, the loader behind `--load-format sharded_state`, is not a completely mature path. I discovered multiple bugs in it that I raised to the SGLang team: 
     - Issue mxfp4 (for e.g gptoss-20b) : https://github.com/sgl-project/sglang/issues/34448
     - Issue with MLA : https://github.com/sgl-project/sglang/issues/35702
 
-  We are also involved in fixes for these: 
+  We are also involved in PRs for these): 
     - https://github.com/sgl-project/sglang/pull/35715
+    - https://github.com/sgl-project/sglang/pull/34558
 - I made `--overlap` as an opt-in flag because for now, it is unsafe. We did not yet implement a barrier mechanism to ensure that the engine does not start before the staging is complete. This is a known issue and we are working on it.
 
-**Tradeoffs**
+**servekit vs. the other loaders**
 
 | Method | Pros ✅| Cons ❌|
 |---|---|---|
 | default loader (mmap) |  | Really slow on Lustre |
 | `--weight-loader-disable-mmap` | One flag, 2.8x to 16x faster than default | - OOMs on large models (GLM-4.7), needed `num_threads=4` to fit<br>- Loads all weights per rank so scales badly with model size |
 | `--load-format fastsafetensors` | - One flag, significant speedups | Doesn't work for multi-node yet; GLM-4.7 result needed a patched version<br> - Scales badly with node count due to costly NCCL though Slingshot |
-| servekit | - Fastest across all models <br>- If model size scales linearly with node count, weight size loaded by node is constant and so is time (see LLama vs GLM4.7, 14s vs 16s)  | - Requires a costly prepare step that happens on first engine start<br>- Relies on `ShardedStateLoader`, which is not a mature path yet; a check with `servekit verify` is recommended to ensure correctness|
+| servekit | - Fastest across all models <br>- If model size scales linearly with node count, weight size loaded by node is constant and so is time (see LLama vs GLM4.7, 14s vs 16s)  | - Slower first run<br>- Relies on `ShardedStateLoader`, a correctness check is needed |
 
-## JIT Compilation
+## II. JIT Compilation
+
+With weight loading fixed, we will take a look at `cuda_graph_capture`(28s) and `warmup_request(JIT)`(15s). While the latter is clearly a JIT compilation phase, the former is a bit more subtle: it is a graph capture phase that triggers JIT compilation during the forward passes of the graph capture. JIT compilation is expensive but simple to cache! SGlang offers already some environment variables to specify a cache directory for the JIT compilation artifacts:
+* `TRITON_CACHE_DIR`
+* `TVM_FFI_CACHE_DIR`
+* `FLASHINFER_WORKSPACE_BASE`
+
+By default, these are set to `$HOME/.cache/triton`, `$HOME/.cache/tvm-ffi` and `$HOME/.cache/flashinfer` respectively. However, on the clusters, `$HOME` is ephemeral and wiped at the end of every job. To cache these artifacts, we can set these environment variables to a persistent directory. 
+
+We persist these to `--servekit-artifact-path` (the same path where we persist the presharded weights). In SML, we expect the first model run that prepares the model to be done by a maintenanter that has write access to this path. However, users will not necessarily have write access to this path, if we naively set their cache directories to this path, they will try to write to it and fail. So we made each launches make a copy of these jit cache directories to a temporary directory in `/tmp` and set the environment variables to point to this temporary directory. This way, users can read from the persistent cache but write to their own temporary cache. We also made sure these caches work cross nodes. 
 
 
 ## III. CUDA Graphs
