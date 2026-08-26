@@ -114,7 +114,7 @@ done
 We measure this on a single 5GB shard (bs=16M, O_DIRECT, `dev/null`), sweeping the number of parallel `dd` processes reading disjoint, contiguous byte ranges of the same file:
 
 <p align="center">
-  <img src="assets/ost_queue_depth.png" alt="OST read throughput scales with the number of parallel readers, then flattens near the NIC line rate" width="60%">
+  <img src="assets/ost_queue_depth.png" alt="OST read throughput scales with the number of parallel readers, then flattens near the NIC line rate" width="50%">
 </p>
 
 Throughput scales close to linearly with reader count up to 16, then flattens. With many processes, we are able to keep many RPCs in flight, improving the bandwidth. 
