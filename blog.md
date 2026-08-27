@@ -74,7 +74,7 @@ To check this, we run the exact same experiment with sglang's `--weight-loader-d
 
 We get **45.7s** for weight loading, which is **14x faster** than the default loader and corresponds to **2.8GiB/s**. 
 
-> **Insight.** For weight loading using an HDD-backed Lustre file system, using `mmap` is a bad idea. The simple `--weight-loader-disable-mmap` flag is a huge improvement.
+> **Lesson.** For weight loading using an HDD-backed Lustre file system, using `mmap` is a bad idea. The simple `--weight-loader-disable-mmap` flag is a huge improvement.
 
 
 This still leaves another possible explanation: maybe it's not `mmap` itself but the many small host-to-device copies it causes. Let's try another one-flag method that does not use `mmap`: `fastsafetensors` (`--load-format fastsafetensors`) partitions files across TP ranks; each TP process reads a file with `pread` and then exchanges the weights with other TP ranks using NCCL communication. *Once all weights are on each GPU, tensors are parsed one by one directly in GPU memory*. This eliminates the need for small tensor copies from host to device. If the small copies were the real bottleneck, this should beat `--weight-loader-disable-mmap`.
@@ -100,7 +100,11 @@ Let's set SGLang aside for a moment and ask a simpler question:
   <img src="assets/lustre.png" alt="Lustre data storage" width="50%">
 </p>
 
-However, single OSTs also benefit from having many requests in flight. For that, we will experiment with `dd iflag=direct`. This command lets us read files from disk without going through the page cache. We can use it as follows 
+However, single OSTs also benefit from having many requests in flight.
+
+*How many parallel readers does a single OST need to reach its full read bandwidth?*
+
+To answer this, we will experiment with `dd iflag=direct`. This command lets us read files from disk without going through the page cache. We can use it as follows 
 `dd iflag=direct if=input.bin of=output.bin bs=16M`, here `bs=16M` is the block size, which is the amount of data read from disk in one request. In our experiment, we will use `bs=16M` and read to `/dev/null` to measure the read speed. We study the effect of the number of parallel `dd` processes on the read speed. 
 
 ```bash
@@ -114,10 +118,12 @@ done
 We measure this on a single 5GB shard (bs=16M, O_DIRECT, `dev/null`), sweeping the number of parallel `dd` processes reading disjoint, contiguous byte ranges of the same file:
 
 <p align="center">
-  <img src="assets/ost_queue_depth.png" alt="OST read throughput scales with the number of parallel readers, then flattens near the NIC line rate" width="50%">
+  <img src="assets/ost_queue_depth.png" alt="OST read throughput scales with the number of parallel readers, then flattens near the NIC line rate" width="40%">
 </p>
 
 Throughput scales close to linearly with reader count up to 16, then flattens. With many processes, we are able to keep many RPCs in flight, improving the bandwidth. 
+
+> **Lesson.** To maximize bandwidth on Lustre storage with `O_DIRECT` reads (no page cache), we need parallelism both across OSTs and within a single OST.
 
 Equipped with this knowledge, we try the following:
 * Load in parallel (60 processes per file, this is maybe too much) from Lustre to `/dev/shm` (RAM), and then use a normal `mmap`-based default loader from `/dev/shm` to GPU. The staging takes `7s`, which is `**> 18GiB/s**`, already much better than everything we have seen before. The weight loading takes `20s`, which is `> 6GiB/s`. This is a **16x speedup** over the default loader.
@@ -214,12 +220,12 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 
 - Presharding the models implies a separate prepare step; `servekit` tries to simplify this by doing it automatically on the first run, so users don't need to worry about it. In fact, when running `servekit launch --servekit-artefact-path <path> python -m sglang.launch_server ...`, a presharded copy of the model is created in `<path>`. This causes a first run to be slower than the default loader. 
 - `ShardedStateLoader`, the loader behind `--load-format sharded_state`, is not a completely mature path. I discovered multiple bugs in it that I raised to the SGLang team: 
-    - Issue mxfp4 (for e.g gptoss-20b) : https://github.com/sgl-project/sglang/issues/34448
-    - Issue with MLA : https://github.com/sgl-project/sglang/issues/35702
+    - [mxfp4 + sharded_state load format silently drops expert weights (gpt-oss-20b)](https://github.com/sgl-project/sglang/issues/34448) (#34448)
+    - [`sharded_state` cannot save and load an MLA model](https://github.com/sgl-project/sglang/issues/35702) (#35702)
 
-  We are also involved in PRs for these): 
-    - https://github.com/sgl-project/sglang/pull/35715
-    - https://github.com/sgl-project/sglang/pull/34558
+  We are also involved in fixes for these: 
+    - [Manually register kv_b_proj to attn_mha so mla model work with ShardedModelLoader](https://github.com/sgl-project/sglang/pull/35715) (#35715)
+    - [Preserve MXFP4 Triton weights in sharded state](https://github.com/sgl-project/sglang/pull/34558) (#34558)
 - I made `--overlap` as an opt-in flag because for now, it is unsafe. We did not yet implement a barrier mechanism to ensure that the engine does not start before the staging is complete. This is a known issue and we are working on it.
 
 **servekit vs. the other loaders**
@@ -259,7 +265,7 @@ becomes the graph : `f --> g`. CUDA graphs are useful to reduce the overhead of 
 
 The issue with CUDA graphs is that their nodes takes as argument **fixed device pointers** (pink pointers in the illustration below). This that in the example above, `f`'s node encodes x's **device pointer**. These virtual device addresses are cuda-context specific. This means that we cannot save the graphs to disk, and replay them in a different context. 
 
-> **Insight.** CUDA graphs cannot be saved to disk and reused across different contexts. 
+> **Lesson.** CUDA graphs cannot be saved to disk and reused across different contexts. 
 
 Multiple methods try to solve this issues. **Medusa** [^2] patches the CUDA graphs node to replace the fixed device pointers with a **virtual pointer**, using hand-written rules per kernel to rewrite addresses on restore. However, these patching rules are kernel-specific and break easily. They don't keep up with new kernels/libraries or non-uniform model architectures (e.g. dense+MoE).
 
@@ -276,7 +282,7 @@ Both these methods are at research stage and not ready for production-like envir
 ## IV. CRIU
 
 <p align="center">
-  <img src="assets/criu-logo.png" alt="CRIU logo" height="80">
+  <img src="assets/criu-logo.png" alt="CRIU logo" height="100">
 </p>
 
 **CRIU** (checkpoint restore in user space) is a Linux utility that can checkpoint a running CPU process to disk and restore it later. 
@@ -286,6 +292,9 @@ On the GPU side, NVIDIA offers **cuda-checkpoint**, a driver that checkpoints a 
 Combining these tools, we can first checkpoint all cuda contexts to RAM using `cuda-checkpoint`, then checkpoint the CPU process using CRIU. And voila, we have a checkpoint of the CPU and GPU. This technique is now natively integrated in a CRIU plugin: CRIU-gpu. 
 
 In our case, we want to checkpoint a warm SGLang server to disk and restore it later. This would allow us to cut off the elusive `piecewise_cuda_graph_capture` and `cuda_graph_capture` times, along with library imports `process_startup` and `tp_worker_spawn`. 
+
+### CSCS
+
 
 Not, so fast. CRIU has one major limitation: it needs priviledges. It's least priviledged mode (`--unprivileged`), still requires:
 * `CAP_CHECKPOINT_RESTORE` and `CAP_SYS_PTRACE` capabilities on the CRIU binary. 
@@ -297,7 +306,7 @@ https://github.com/checkpoint-restore/criu/blob/criu-dev/Documentation/criu.txt
 
 On our CSCS clusters, we cannot obtain these capabilites. Moreover, the `enroot` containers commonly used for our SLURM jobs add a seccomp filter, which makes CRIU unusable. 
 
-> **Insight.** We cannot use CRIU on CSCS slurm clusters. 
+> **Lesson.** We cannot use CRIU on CSCS slurm clusters. 
 
 We still explore CRIU on our local machines for a complete assessment of the potential of this technique. 
 
