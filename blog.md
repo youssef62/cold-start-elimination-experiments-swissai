@@ -297,11 +297,11 @@ In our case, we want to checkpoint a warm SGLang server to disk and restore it l
 
 
 Not, so fast. CRIU has one major limitation: it needs priviledges. It's least priviledged mode (`--unprivileged`), still requires:
-* `CAP_CHECKPOINT_RESTORE` and `CAP_SYS_PTRACE` capabilities on the CRIU binary. 
+* `CAP_CHECKPOINT_RESTORE` and `CAP_SYS_PTRACE` capabilities on the CRIU binary. (see [docs](
+https://github.com/checkpoint-restore/criu/blob/criu-dev/Documentation/criu.txt))
 * A container that does not have a syscall filter i.e with `Seccomp:0`. A non zero `seccomp` indicates a specific syscall filter and CRIU currently refuses to run in such containers.
 
 
-https://github.com/checkpoint-restore/criu/blob/criu-dev/Documentation/criu.txt
 
 
 On our CSCS clusters, we cannot obtain these capabilites. Moreover, the `enroot` containers commonly used for our SLURM jobs add a seccomp filter, which makes CRIU unusable. 
