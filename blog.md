@@ -328,13 +328,30 @@ Getting a full SGLang server to checkpoint and restore cleanly, and to be **reus
 * **Log file size**: CRIU records the server's log file by path *and size*, and refuses to restore if that size changed (which it will, since the restored process keeps appending to it). We reset the log to its snapshot-time size before every restore. 
 * **TCP connection**: CRIU normally preserves open TCP connections across dump/restore, but that needs a privilege (`CAP_NET_ADMIN`) we don't have. We instead tell CRIU to just close the connection (`--tcp-close`). This is harmless in the **1 GPU case** as we do not use NCCL connections between GPUs. 
 
+*Results with 2x RTX 3060, 12GB VRAM each, Ubuntu 22.04, SGLang v0.5.10, `--tensor-parallel-size 2`*
+
+Without the `CAP_NET_ADMIN` capability, we have to `--tcp-close` on dump. This also force-closes the TCPStore connection that `ProcessGroupNCCL` keeps open between the two TP ranks. A background heartbeat thread polls this connection for the lifetime of the process, not just at init. After restore, the connection is dead, so the poll fails and the rank crashes.
+
+We could work around this at the application level. We would need to patch SGLang to destroy the process group before checkpointing, then rebuild it (fresh TCPStore + `ncclCommInitRank`) after restore. This is the same approach vLLM's own CUDA-checkpoint RFC takes [^4]. But rebuilding the process group invalidates the old NCCL communicator handles. CUDA graphs that captured NCCL collectives embed those handles, so they would need to be re-captured too. This defeats the point of checkpoint/restore in the first place.
+
+`CAP_NET_ADMIN` is a powerful capability that we could also not get on our clusters. We still tested it on our local machine, for completeness. However, for a real deployment, a workaround needs to be used. 
+
+| path | time to serving | speedup vs cold start | checkpoint time |
+|---|---|---|---|
+| cold launch (weights + JIT compile) | 91.2s | 1x | — |
+| naive restore | 29.2s | 3.12x | 61.9s (29GB snapshot) |
+| thin restore | 19.8s | 4.62x | 18.1s (9.5GB snapshot) |
 
 
+One limitation remains. These TP=2 snapshots are currently single-use. A libfabric/PSM shared-memory file under `/dev/shm`, only present at TP>1, gets unlinked by the first restore's process on exit. So a second restore from the same snapshot fails looking for it. This is the same class of bug as the semaphore issue above, just not yet widened to cover this file.
 
+> **Lesson.** Multi-GPU checkpoint/restore is possible with CRIU and CUDA-checkpoint, but requires `CAP_NET_ADMIN` which is not available on clusters. 
 
 [^1]: A threadpool of size 8 is used to do mmap in parallel. 
 
 [^2]: [Medusa: Accelerating Serverless LLM Inference with Materialization](https://dl.acm.org/doi/epdf/10.1145/3669940.3707285)
 
 [^3]: [Foundry: Template-Based CUDA Graph Context Materialization for Fast LLM Serving Cold Start](https://arxiv.org/abs/2604.06664)
+
+[^4]: [vllm-project/vllm#34303](https://github.com/vllm-project/vllm/issues/34303)
 
