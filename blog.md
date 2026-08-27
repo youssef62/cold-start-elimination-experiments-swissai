@@ -343,7 +343,7 @@ We could work around this at the application level. We would need to patch SGLan
 | thin restore | 19.8s | 4.62x | 18.1s (9.5GB snapshot) |
 
 
-One limitation remains. These TP=2 snapshots are currently single-use. A libfabric/PSM shared-memory file under `/dev/shm`, only present at TP>1, gets unlinked by the first restore's process on exit. So a second restore from the same snapshot fails looking for it. This is the same class of bug as the semaphore issue above, just not yet widened to cover this file.
+* **PSM shared-memory file**: like the semaphore above, a libfabric/PSM file under `/dev/shm` (only present at TP>1) was getting deleted by the first restore's process on exit, making the snapshot single-use. We fixed it the same way: unlink it before checkpointing so CRIU includes it as a ghost file.
 
 > **Lesson.** Multi-GPU checkpoint/restore is possible with CRIU and CUDA-checkpoint, but requires `CAP_NET_ADMIN` which is not available on clusters. 
 
