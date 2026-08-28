@@ -11,9 +11,9 @@
 *This work was conducted as a summer internship at the EPFL AI Center, with supervision from Xiaozhe Yao.*
 
 
-Access to LLMs is crucial for academic research, be it for AI research, model testing or data annotation. For this reason, the SwissAI initiative operates an LLM serving platform on top of CSCS's Alps Clusters using [OpenTela](https://about.yao.sh/posts/opentela-swissai/) to pool together serving instances of multiple users in a decentralized manner and [SML](https://github.com/swiss-ai/model-launch) to seamlessly spin up nodes on top of `slurm` or CSCS's FireCrest. However, the current model launch suffers from large cold start times, which can be a bottleneck for research and development. In fact, an SGlang or VLLM server must first go through many costly steps before it can serve requests, including loading the model weights to GPU memory, computing CUDA Graphs, compiling JIT kernels and initializing NCCL communication. This can take tens of minutes for large models. 
+Access to LLMs is crucial for academic research, use cases include: AI research, model testing or data annotation. For this reason, the SwissAI initiative operates an LLM serving platform on top of CSCS's Alps Clusters using [OpenTela](https://about.yao.sh/posts/opentela-swissai/) to pool together serving instances of multiple users in a decentralized manner and [SML](https://github.com/swiss-ai/model-launch) to seamlessly spin up nodes on top of Slurm or CSCS's FireCrest. However, the current model launch suffers from large cold start times, which can be a bottleneck for research and development. In fact, an SGlang or VLLM server must first go through many costly steps before it can serve requests, including loading the model weights from remote storage to GPU memory, computing CUDA Graphs, compiling JIT kernels and initializing NCCL communication. This can take tens of minutes for large models. 
 
-This post walks through the cold start elimination experiments for the SwissAI model launch: what we tried, what worked, and what didn't. We shipped what worked into a package called [<a href="https://github.com/eth-easl/servekit"><img src="https://cdn.simpleicons.org/github" height="14" style="vertical-align:-1px;margin-left:4px"></a> **Servekit 🧊 → 🔥**](https://github.com/eth-easl/servekit). <br>Servekit wraps sglang launches and cuts weight loading from minutes down to single-digit seconds with our lustre storage. CRIU and CUDA graph checkpointing on the other handboth hit walls we couldn't get around on our clusters. 
+This post walks through the cold start elimination experiments for the SwissAI model launch: what we tried, what worked, and what didn't. We shipped what worked into a package called [<img src="https://cdn.simpleicons.org/github" height="14" style="vertical-align:-1px;margin-left:4px"> **Servekit 🧊 → 🔥**](https://github.com/eth-easl/servekit). <br>[**Servekit**](https://github.com/eth-easl/servekit) wraps sglang launches and cuts weight loading **from minutes down to single-digit seconds with our lustre storage**. CRIU and CUDA graph checkpointing on the other handboth hit walls we couldn't get around on CSCS clusters. 
 
 ## Table of Contents
 
@@ -30,11 +30,11 @@ This post walks through the cold start elimination experiments for the SwissAI m
 
 ## I. Time Breakdown
 
-We first map the cold start steps to their wall-clock time to identify the bottlenecks. We do this by parsing the logs printed by the SGLang server during the cold start phase. We added the log parser to `servekit` as `servekit profile`. 
+We first map the cold start steps to their wall-clock time to identify the bottlenecks. We do this by parsing the logs printed by the SGLang server during the cold start phase. We added the log parser to `servekit` as a CLI command: `servekit profile`. 
 
 For this experiment, we use `Llama-3.1-70B-Instruct` served with SGLang v0.5.10 (image `lmsysorg/sglang:v0.5.10`) with tensor-parallel size 4 on a single Bristen cluster node, with weights loaded with the default sglang model loader. SML keeps models in `capstor/store`, which is a [Lustre](https://www.lustre.org/) file system.  
 
-/users/yboughizane/scratch/simple-serving-stack/experiments/lustre-loading-exp/results/meeting-sweep/2026-08-21/phase1_3_e2e-mmap-80022-nid002293-profile.json
+([TODO]: add the code for this and logs to this repo. /users/yboughizane/scratch/simple-serving-stack/experiments/lustre-loading-exp/results/meeting-sweep/2026-08-21/phase1_3_e2e-mmap-80022-nid002293-profile.json)
 
 | phase | duration_s | explanation |
 |---|---|---|
@@ -49,10 +49,13 @@ For this experiment, we use `Llama-3.1-70B-Instruct` served with SGLang v0.5.10 
 | warmup_request(JIT) | 15.00 | Warmup request that triggers remaining JIT kernel compilation |
 | **total** | **826.05** | |
 
+As we can see, loading weights from persistent storage (`capstor/store`) is by far the most time-consuming step, with **78%** of the total cold start time. It is followed by CUDA graphs capture (`piecewise_cuda_graph_capture` + `cuda_graph_capture`) which is **13%**. The other steps account for around **9%** of the total cold start time and are mostly JIT compilation and python package imports.
+
 ## II. Weight Loading
 
-As we can see, loading weights from persistent storage (`capstor/store`) is by far the most time-consuming step, with **78%** of the total cold start time. **652.19** seconds for a 70B (130GB) model is a lot, that is **0.2GiB/s**. [Capstor's aggregate theoretical bandwidth](https://docs.cscs.ch/alps/storage/) (across all users and jobs) is a whopping **1.19 TB/s**, and we are connected to it with [4 HPE Cray Slingshot-11 NICs](https://docs.cscs.ch/alps/hardware/#alps-high-speed-network) with a combined bandwidth of **4x23.28 GiB/s**. So we should definitely do better than **0.2GiB/s**. Let's understand why this happens.
+ Weight loading is clearly the bottleneck, **652.19** seconds for loading a 70B (130GB) model is a lot, that is **0.2GiB/s**. [Capstor's aggregate theoretical bandwidth](https://docs.cscs.ch/alps/storage/) (across all users and jobs) is a whopping **1.19 TB/s**, and we are connected to it with [4 HPE Cray Slingshot-11 NICs](https://docs.cscs.ch/alps/hardware/#alps-high-speed-network) with a combined bandwidth of **4x23.28 GiB/s**, so this bandwidth should be our bottleneck. Meaning, we should definitely do better than **0.2GiB/s**. 
 
+Let's understand try to understand: 
 
 *Why is the default weight loader so slow in our setup?*
 
@@ -60,15 +63,15 @@ As we can see, loading weights from persistent storage (`capstor/store`) is by f
 
 The default SGLang loader uses `mmap` to load the weight files. 
 
-But what is `mmap`? `mmap` is a system call that maps a virtual memory region to a file. That memory region will not be mapped to a physical memory region until it is accessed. When a `mmap`ed page is accessed for the first time, the kernel will realize that the virtual page does not have a corresponding physical page but is `mmap`ed to a file. So it will load the corresponding file page from disk to the page cache and then associate the virtual page with the page cache page. This is called a **major page fault**. On subsequent access, the virtual page is already mapped to a physical page in the page cache and no disk access is needed. This is called a **minor page fault**. [^1]
+But what is `mmap`? `mmap` is a system call that maps a virtual memory region to a file. That memory region will not be mapped to a physical memory region until it is accessed a first time. When a `mmap`ed page is accessed for the first time, the kernel will realize that the virtual page does not have a corresponding physical page but is `mmap`ed to a file. So it will load the corresponding page from disk to the page cache (RAM) and then associate the virtual page with the page cache page. This is called a **major page fault**. On subsequent access, the virtual page is already mapped to a physical page in the page cache and no disk access is needed. This is called a **minor page fault**. [^1]
 
-Concretely, the `DefaultModelLoader` calls methods like `multi_thread_safetensors_weights_iterator`, which return an iterator over pairs (`tensor_name`, `tensor_weights`) where `tensor_weights` is a `mmap`'ed tensor. This iterator is passed to `LlamaForCausalLM`, which passes each parameter (like `ColumnParallelLinear`) its tensor weights. The parameter will then get a view of its needed weights according to its rank (`tp_rank` in the case of `ColumnParallelLinear`) and will then initiate a host (CPU) to device (GPU) copy of the weights.
+Concretely, in our LLama example, the `DefaultModelLoader` calls methods like `multi_thread_safetensors_weights_iterator`, which return an iterator over pairs (`tensor_name`, `tensor_weights`) where `tensor_weights` is a `mmap`'ed tensor. This iterator is passed to `LlamaForCausalLM`, which passes each parameter (like `ColumnParallelLinear`) its tensor weights. The parameter will then get a view of its needed weights according to its rank (`tp_rank` in the case of `ColumnParallelLinear`) and will then initiate a host (CPU) to device (GPU) copy of the weights.
 
 <p align="center">
   <img src="assets/weight-loading.png" alt="Weight loading: mmap to shard to GPU" width="50%">
 </p>
 
-Our hypothesis is that this triggers a **major page fault** for each page touched, which gets loaded from Lustre going through the network to the page cache and then copied to GPU. This would be a very slow process, especially for large models with many tensors spread over many pages. 
+Our hypothesis is that this triggers a **major page fault** for each page touched, which gets loaded from Lustre going through the network to the page cache and then copied to GPU. This would be a very slow process, especially for large models with many tensors spread over many pages. [^2]
 
 To check this, we run the exact same experiment with sglang's `--weight-loader-disable-mmap`, which skips `mmap` entirely. 
 
@@ -83,7 +86,7 @@ We get **59.1s** for weight loading, which is **11x faster** than the default lo
 
 This is a huge improvement and shows that `mmap` is not suitable for weight loading on Lustre file systems. However, **2.8GiB/s** is still far from the theoretical maximum of **4x23.28 GiB/s**. Let's see if we can do better.
 
-- The no-mmap techniques are very sensitive to the number of CPUs. 
+- Remark. The no-mmap techniques are very sensitive to the number of CPUs. ([TODO].add experiment for this.)
 
 
 
@@ -93,7 +96,7 @@ Let's set SGLang aside for a moment and ask a simpler question:
 
 *Irrespective of SGLang, How fast can we load files from Lustre?*
 
- Lustre is a distributed file system that saves files across different *Object Storage Targets (OSTs)*. Each OST is a storage volume that can be accessed independently. To increase the read bandwidth, we need to distribute the model weights across multiple OSTs so we can benefit from parallelism across OSTs. In our case, we will have each `.safetensors` file in a different OST. For models like `LLama-3.1-70B-Instruct`, there are 30 `.safetensors` files. 
+**Across OST parallelism.** Lustre is a distributed file system that saves files across different *Object Storage Targets (OSTs)*. Each OST is a storage volume that can be accessed independently. To increase the read bandwidth, we need to distribute the model weights across multiple OSTs so we can benefit from parallelism across OSTs. In our case, we will have each `.safetensors` file in a different OST. For models like `LLama-3.1-70B-Instruct`, there are 30 `.safetensors` files. 
 
 
 <p align="center">
@@ -101,6 +104,8 @@ Let's set SGLang aside for a moment and ask a simpler question:
 </p>
 
 However, single OSTs also benefit from having many requests in flight.
+
+**Within OST parallelism.** Even within a single OST, we can increase the read bandwidth by having multiple processes reading from the same OST in parallel. This is because each process can issue its own I/O requests, and the OST can handle these requests concurrently.
 
 *How many parallel readers does a single OST need to reach its full read bandwidth?*
 
@@ -111,11 +116,11 @@ To answer this, we will experiment with `dd iflag=direct`. This command lets us 
 per=$(( 64 / nprocess ))            
 t0=$(date +%s.%N)
 for ((i=0;i<nprocess;i++)); do
-dd if="${SICK}" of=/dev/null bs=16M skip=$((i*per)) count=$per iflag=direct status=none &
+  dd if="${SICK}" of=/dev/null bs=16M skip=$((i*per)) count=$per iflag=direct status=none &
 done
 ```
 
-We measure this on a single 5GB shard (bs=16M, O_DIRECT, `dev/null`), sweeping the number of parallel `dd` processes reading disjoint, contiguous byte ranges of the same file:
+We measure this on a single 5GB shard (`bs=16M`, `O_DIRECT`, `dev/null`), sweeping the number of parallel `dd` processes reading disjoint, contiguous byte ranges of the same file:
 
 <p align="center">
   <img src="assets/ost_queue_depth.png" alt="OST read throughput scales with the number of parallel readers, then flattens near the NIC line rate" width="40%">
@@ -126,7 +131,7 @@ Throughput scales close to linearly with reader count up to 16, then flattens. W
 > **Lesson.** To maximize bandwidth on Lustre storage with `O_DIRECT` reads (no page cache), we need parallelism both across OSTs and within a single OST.
 
 Equipped with this knowledge, we try the following:
-* Load in parallel (60 processes per file, this is maybe too much) from Lustre to `/dev/shm` (RAM), and then use a normal `mmap`-based default loader from `/dev/shm` to GPU. The staging takes `7s`, which is `**> 18GiB/s**`, already much better than everything we have seen before. The weight loading takes `20s`, which is `> 6GiB/s`. This is a **16x speedup** over the default loader.
+* Load in parallel (60 processes per file, this is maybe too much) from Lustre to `/dev/shm` (RAM), and then use sglang's default loader from `/dev/shm` to GPU. The staging takes `7s`, which is more than `**18GiB/s**`, already much better than everything we have seen before. The weight loading takes `20s`, which is `> 6GiB/s`. Overall, this is a **16x speedup** over the default loader.
 
 <p align="center">
   <img src="assets/parallel-reads-lustre.png" alt="Parallel processes read file chunks from different OSTs on Lustre into /dev/shm, which SGLang then reads from" width="70%">
@@ -134,10 +139,10 @@ Equipped with this knowledge, we try the following:
 
 * This idea is possible because each node in both our clusters (Bristen and Clariden) has more RAM than GPU RAM. This means a node's specific shard of weights can always be stored in RAM if we preshard the weights across nodes. This is what we do next. We use `--load-format sharded_state`, which lets us save our weights by their TP rank. One added benefit is that our weights are now contiguous for each rank, which speeds up our H2D reads (see below). 
 
-* Staging to `/dev/shm` is better than warming up the page cache for models that don't fit in a single node. For these, to warm all the weights a rank needs, we would need to fill the page cache with weights that don't fit. 
+* Staging to `/dev/shm` is better than warming up the page cache for models that don't fit in a single node. For these, to warm all the weights a rank needs, we would need to fill the page cache with all weights of the model which don't fit in the RAM. 
 
 * Staging to `/dev/shm` is different from using `--weight-loader-disable-mmap` in two ways. 
-    1. With `--weight-loader-disable-mmap`, each rank still reads the complete model weights: although it discards most of it and keeps only its shard, it still reads all of it. 
+    1. Scaling: With `--weight-loader-disable-mmap`, each rank still reads the complete model weights: **although it discards most of it and keeps only its shard, it still reads all of it.** Meaning the total size of weights loaded will increase **linearly** with the node size. In our method, it will remain constant. 
     2. Implementation: the standard `--weight-loader-disable-mmap` has 8 threads by default, each running a `pread` on a file. If our files are big, this will overflow RAM. 
 
 
@@ -154,13 +159,9 @@ Equipped with this knowledge, we try the following:
 
 * To avoid corrupting our results with any kind of caching, we run the methods in **reverse order** of expected speed and on different nodes, meaning `dev/shm + presharded + overlap` ran before the default loader experiment. 
 
-
-
-lustre-loading-exp/results/meeting-sweep/bristen-2026-08-24-cpu128
+[TODO] Add the logs of this experiment and the scripts to this repo. Also, add statistics for multiple runs of the same experiment in the appendix. /users/yboughizane/scratch/simple-serving-stack/experiments/lustre-loading-exp/results/meeting-sweep/bristen-2026-08-24-cpu128
 
 ### 3. Fast weight loading with servekit
-
-/users/yboughizane/scratch/simple-serving-stack/experiments/lustre-loading-exp/results/meeting-sweep/bristen-2026-08-24-cpu128/results.md
 
 I packaged the above ideas into a package called `servekit` that can be used to launch SGLang servers with fast cold starts. The goal is for `servekit` to be a wrapper around SGLang that implements cold start elimination optimizations. Currently, `servekit` implements fast weight loading and JIT kernels caching (more on this later). 
 
@@ -178,7 +179,7 @@ experiments/servekit-eval/results/results.md
 
 **Comprehensive results**
 
-
+We evaluate `servekit` against the default loader, `--weight-loader-disable-mmap` and `--load-format fastsafetensors` on multiple models. 
 
 *Config*
 
@@ -215,18 +216,20 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 * `-weight-loader-disable-mmap` ooms on GLM-4.7, so we had to reduce the number of threads to 4 on bristen and 2 on clariden. Similary, it ooms on Llama-3.1-70B-Instruct on clariden, so we had to reduce the number of threads to 4. 
 * `fastsafetensors` does not work for multi-node currently, the reported result for GLM4.7 is a patched version. 
 
-
 **servekit's limitations**
 
-- Presharding the models implies a separate prepare step; `servekit` tries to simplify this by doing it automatically on the first run, so users don't need to worry about it. In fact, when running `servekit launch --servekit-artefact-path <path> python -m sglang.launch_server ...`, a presharded copy of the model is created in `<path>`. This causes a first run to be slower than the default loader. 
-- `ShardedStateLoader`, the loader behind `--load-format sharded_state`, is not a completely mature path. I discovered multiple bugs in it that I raised to the SGLang team: 
+- **On Correctness**: We rely on `ShardedStateLoader`, the loader behind `--load-format sharded_state`, which we discovered contained some bugs. To spot bugs, we use `servekit verify --url <ip> -record gold.json` to record the gold logprobs of a model served with the default loader, and then use `servekit verify --url <ip> -compare gold.json` to compare the logprobs of the same model served with `servekit`. This is a very strict test that checks for bitwise identical logprobs. All models above pass this test with bitwise identical logprobs. However, some models currently don't because of bugs in `ShardedStateLoader`(e.g `gpt-oss-20b`). It is therefore imported when using `servekit` to first check your model is supported with `servekit verify`. 
+
+  Here are the bugs I discovered that I raised to the SGLang team: 
     - [mxfp4 + sharded_state load format silently drops expert weights (gpt-oss-20b)](https://github.com/sgl-project/sglang/issues/34448) (#34448)
     - [`sharded_state` cannot save and load an MLA model](https://github.com/sgl-project/sglang/issues/35702) (#35702)
 
   We are also involved in fixes for these: 
     - [Manually register kv_b_proj to attn_mha so mla model work with ShardedModelLoader](https://github.com/sgl-project/sglang/pull/35715) (#35715)
     - [Preserve MXFP4 Triton weights in sharded state](https://github.com/sgl-project/sglang/pull/34558) (#34558)
-- I made `--overlap` as an opt-in flag because for now, it is unsafe. We did not yet implement a barrier mechanism to ensure that the engine does not start before the staging is complete. This is a known issue and we are working on it.
+
+- **On ergonomics**: Presharding the models implies a separate prepare step; `servekit` tries to simplify this by doing it automatically on the first run, so users don't need to worry about it. In fact, when running `servekit launch --servekit-artefact-path <path> python -m sglang.launch_server ...`, a presharded copy of the model is created in `<path>`. This causes a first run to be slower than the default loader. 
+- **Implementation detail**: I made `--overlap` as an opt-in flag because for now, it is unsafe. We did not yet implement a barrier mechanism to ensure that the engine does not start before the staging is complete. This is a known issue and we are working on it.
 
 **servekit vs. the other loaders**
 
@@ -267,9 +270,9 @@ The issue with CUDA graphs is that their nodes takes as argument **fixed device 
 
 > **Lesson.** CUDA graphs cannot be saved to disk and reused across different contexts. 
 
-Multiple methods try to solve this issues. **Medusa** [^2] patches the CUDA graphs node to replace the fixed device pointers with a **virtual pointer**, using hand-written rules per kernel to rewrite addresses on restore. However, these patching rules are kernel-specific and break easily. They don't keep up with new kernels/libraries or non-uniform model architectures (e.g. dense+MoE).
+Multiple methods try to solve this issues. **Medusa** [^3] patches the CUDA graphs node to replace the fixed device pointers with a **virtual pointer**, using hand-written rules per kernel to rewrite addresses on restore. However, these patching rules are kernel-specific and break easily. They don't keep up with new kernels/libraries or non-uniform model architectures (e.g. dense+MoE).
 
-**Foundry [^3]** on the other hand, intercepts the memory allocation API and makes it return the same virtual addresses every run, so captured pointers stay valid with no per-kernel patching. However, it currently lacks TP support and doesn't capture prefill graphs (`piecewise_cuda_graph_capture`), which account for most of the CUDA graph capture time.
+**Foundry [^4]** on the other hand, intercepts the memory allocation API and makes it return the same virtual addresses every run, so captured pointers stay valid with no per-kernel patching. However, it currently lacks TP support and doesn't capture prefill graphs (`piecewise_cuda_graph_capture`), which account for most of the CUDA graph capture time.
 
 Both these methods are at research stage and not ready for production-like environments, which is why we did not use them.
 <p align="center">
@@ -332,7 +335,7 @@ Getting a full SGLang server to checkpoint and restore cleanly, and to be **reus
 
 Without the `CAP_NET_ADMIN` capability, we have to `--tcp-close` on dump. This also force-closes the TCPStore connection that `ProcessGroupNCCL` keeps open between the two TP ranks. A background heartbeat thread polls this connection for the lifetime of the process, not just at init. After restore, the connection is dead, so the poll fails and the rank crashes.
 
-We could work around this at the application level. We would need to patch SGLang to destroy the process group before checkpointing, then rebuild it (fresh TCPStore + `ncclCommInitRank`) after restore. This is the same approach vLLM's own CUDA-checkpoint RFC takes [^4]. But rebuilding the process group invalidates the old NCCL communicator handles. CUDA graphs that captured NCCL collectives embed those handles, so they would need to be re-captured too. This defeats the point of checkpoint/restore in the first place.
+We could work around this at the application level. We would need to patch SGLang to destroy the process group before checkpointing, then rebuild it (fresh TCPStore + `ncclCommInitRank`) after restore. This is the same approach vLLM's own CUDA-checkpoint RFC takes [^5]. But rebuilding the process group invalidates the old NCCL communicator handles. CUDA graphs that captured NCCL collectives embed those handles, so they would need to be re-captured too. This defeats the point of checkpoint/restore in the first place.
 
 `CAP_NET_ADMIN` is a powerful capability that we could also not get on our clusters. We still tested it on our local machine, for completeness. However, for a real deployment, a workaround needs to be used. 
 
@@ -349,9 +352,11 @@ We could work around this at the application level. We would need to patch SGLan
 
 [^1]: A threadpool of size 8 is used to do mmap in parallel. 
 
-[^2]: [Medusa: Accelerating Serverless LLM Inference with Materialization](https://dl.acm.org/doi/epdf/10.1145/3669940.3707285)
+[^2]: Actually, when a page fault happens a certain number X of pages is loaded at once for efficiency, thanks to readahead. This X is set by the Lustre client's `max_read_ahead_mb` / `max_read_ahead_per_file_mb` tunables (`/sys/fs/lustre/llite/*/max_read_ahead_per_file_mb`, 160MB per file on our cluster). However, even with this in mind, the general intuition that this causes many small network round trips remains.
 
-[^3]: [Foundry: Template-Based CUDA Graph Context Materialization for Fast LLM Serving Cold Start](https://arxiv.org/abs/2604.06664)
+[^3]: [Medusa: Accelerating Serverless LLM Inference with Materialization](https://dl.acm.org/doi/epdf/10.1145/3669940.3707285)
 
-[^4]: [vllm-project/vllm#34303](https://github.com/vllm-project/vllm/issues/34303)
+[^4]: [Foundry: Template-Based CUDA Graph Context Materialization for Fast LLM Serving Cold Start](https://arxiv.org/abs/2604.06664)
+
+[^5]: [vllm-project/vllm#34303](https://github.com/vllm-project/vllm/issues/34303)
 
