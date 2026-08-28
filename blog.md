@@ -362,7 +362,7 @@ We could work around this at the application level. We would need to patch SGLan
 
 * **PSM shared-memory file**: like the semaphore above, a libfabric/PSM file under `/dev/shm` (only present at TP>1) was getting deleted by the first restore's process on exit, making the snapshot single-use. We fixed it the same way: unlink it before checkpointing so CRIU includes it as a ghost file.
 
-> **Lesson.** Multi-GPU checkpoint/restore is possible with CRIU and CUDA-checkpoint, but requires `CAP_NET_ADMIN` which is not available on clusters. 
+
 
 **CRIU checkpoint/restore: pros and cons**
 
@@ -370,6 +370,8 @@ We could work around this at the application level. We would need to patch SGLan
 |---|---|---|
 | **TP = 1** | - Restore is 6.3× faster than cold start (**17.4s vs 109.8s**)<br>- `--tcp-close` is harmless (no NCCL connections between GPUs) | - Still needs `CAP_CHECKPOINT_RESTORE` + `CAP_SYS_PTRACE`, unavailable on CSCS<br>- enroot's seccomp filter blocks CRIU entirely<br> |
 | **TP > 1** | - Restore 4.6× faster (**19.8s vs 91.2s**) | - Requires `CAP_NET_ADMIN` additionally to preserve the NCCL connectionn.<br> - Otherwise, would need patching SGLang to destroy the process group, then rebuild it **along with Cuda Graphs**.  |
+
+> **Lesson.** Local CRIU checkpoint/restore show promising speedups. Multi-GPU setups require `CAP_NET_ADMIN` to preserve NCCL connections. 
 
 [^1]: A threadpool of size 8 is used to do mmap in parallel. 
 
