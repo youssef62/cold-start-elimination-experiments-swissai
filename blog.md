@@ -8,12 +8,14 @@
   <img src="assets/easl-logo.png" alt="ETH EASL" height="50">
 </p>
 
-*This work was conducted as a summer internship at the EPFL AI Center, with supervision from Xiaozhe Yao.*
+*By Youssef Boughizane. This work was conducted as a summer internship at the EPFL AI Center, with supervision from Xiaozhe Yao (EASL Lab, Systems Group, ETH Zurich).*
 
 
 Access to LLMs is crucial for academic research; use cases include AI research, model testing, and data annotation. For this reason, the SwissAI initiative operates an LLM serving platform on top of CSCS's Alps clusters, using [OpenTela](https://about.yao.sh/posts/opentela-swissai/) to pool together serving instances of multiple users in a decentralized manner and [SML](https://github.com/swiss-ai/model-launch) to seamlessly spin up nodes on top of Slurm or CSCS's FireCrest. However, the current model launch suffers from large cold start times, which can be a bottleneck for research and development. An SGLang or vLLM server must first go through many costly steps before it can serve requests, including loading the model weights from remote storage to GPU memory, capturing CUDA graphs, compiling JIT kernels, and initializing NCCL communication. This can take tens of minutes for large models. 
 
-This post walks through our cold start elimination experiments for SwissAI model launch: what we tried, what worked, and what didn't. We shipped what worked into a package called [<img src="https://cdn.simpleicons.org/github" height="14" style="vertical-align:-1px;margin-left:4px"> **Servekit 🧊 → 🔥**](https://github.com/eth-easl/servekit). **Servekit** wraps SGLang launches and cuts weight loading **from minutes down to single-digit seconds on our Lustre storage**. CRIU and CUDA graph checkpointing, on the other hand, both hit walls we couldn't get around on CSCS clusters. 
+This post walks through our cold start elimination experiments for SwissAI model launch: what we tried, what worked, and what didn't. We shipped what worked into a package called [<img src="https://cdn.simpleicons.org/github" height="14" style="vertical-align:-1px;margin-left:4px"> **Servekit 🧊 → 🔥**](https://github.com/eth-easl/servekit). 
+
+**Servekit** wraps SGLang launches and cuts weight loading **from minutes down to single-digit seconds on our Lustre storage**. CRIU and CUDA graph checkpointing, on the other hand, both hit walls we couldn't get around on CSCS clusters. 
 
 ## Table of Contents
 
