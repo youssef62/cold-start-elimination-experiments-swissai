@@ -343,8 +343,11 @@ We tested checkpoint/restore on a local machine with 2x RTX 3060 GPUs (12 GB eac
 To free and reload the weights for the thin snapshot, we use SGLang's `/release_memory_occupation` and `/resume_memory_occupation` HTTP endpoints, which let you drop and reload model weights (and KV cache) on a running server without restarting it. See the [SGLang docs](https://docs.sglang.io/docs/advanced_features/sglang_for_rl) for details.
 
 Getting a full SGLang server to checkpoint and restore cleanly, and to be **reusable** (restored from more than once), also required working around a few CRIU quirks:
+
 * **Semaphore**: SGLang creates a POSIX semaphore in `/dev/shm`. By default CRIU prefers not to include the semaphore in the checkpoint, so it creates and saves a hard link to it. However, this means that when one restore succeeds and tears down, it clears the semaphore and it is deleted from the filesystem. Without a semaphore in the filesystem anymore, the checkpoint becomes unusable for further restores. To solve this, we tell CRIU to include the semaphore in the checkpoint as a **ghost file** instead of a hard link. We do this by unlinking the semaphore from `/dev/shm` before checkpointing; the inode stays alive because the SGLang process has an open file descriptor to it. CRIU includes unlinked files in the checkpoint as ghost files, to be sure it finds them on restore. 
+
 * **Log file size**: CRIU records the server's log file by path *and size*, and refuses to restore if that size changed (which it will, since the restored process keeps appending to it). We reset the log to its snapshot-time size before every restore. 
+
 * **TCP connection**: CRIU normally preserves open TCP connections across dump/restore, but that needs a privilege (`CAP_NET_ADMIN`) we don't have. We instead tell CRIU to just close the connection (`--tcp-close`). This is harmless in the **1 GPU case** as we do not use NCCL connections between GPUs. 
 
 *Results with 2x RTX 3060, 12 GB VRAM each, Ubuntu 22.04, SGLang v0.5.10, `--tensor-parallel-size 2`*
