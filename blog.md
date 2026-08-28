@@ -364,6 +364,13 @@ We could work around this at the application level. We would need to patch SGLan
 
 > **Lesson.** Multi-GPU checkpoint/restore is possible with CRIU and CUDA-checkpoint, but requires `CAP_NET_ADMIN` which is not available on clusters. 
 
+**CRIU checkpoint/restore: pros and cons**
+
+| | Pros ✅ | Cons ❌ |
+|---|---|---|
+| **TP = 1** | - Restore is 6.3× faster than cold start (**17.4s vs 109.8s**)<br>- `--tcp-close` is harmless (no NCCL connections between GPUs) | - Still needs `CAP_CHECKPOINT_RESTORE` + `CAP_SYS_PTRACE`, unavailable on CSCS<br>- enroot's seccomp filter blocks CRIU entirely<br> |
+| **TP > 1** | - Restore 4.6× faster (**19.8s vs 91.2s**) | - Requires `CAP_NET_ADMIN` additionally to preserve the NCCL connectionn.<br> - Otherwise, would need patching SGLang to destroy the process group, then rebuild it **along with Cuda Graphs**.  |
+
 [^1]: A threadpool of size 8 is used to do mmap in parallel. 
 
 [^2]: Actually, when a page fault happens a certain number X of pages is loaded at once for efficiency, thanks to readahead. This X is set by the Lustre client. However, even with this in mind, the general intuition that this causes many small network round trips remains.
