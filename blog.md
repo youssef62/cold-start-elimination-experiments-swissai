@@ -295,7 +295,7 @@ Multiple methods try to solve this issue.
 
 Both these methods are at research stage and not ready for production-like environments, which is why we did not use them.
 <p align="center">
-  <img src="assets/cg-medusa.png" alt="Capturing a CUDA graph with PyTorch, the underlying kernels it launches, and the resulting captured CUDA graph" width="70%">
+  <img src="assets/cg-medusa.png" alt="Capturing a CUDA graph with PyTorch, the underlying kernels it launches, and the resulting captured CUDA graph" width="50%">
   <br>
   <sub>Source: <a href="https://dl.acm.org/doi/epdf/10.1145/3669940.3707285">Medusa: Accelerating Serverless LLM Inference with Materialization</a></sub>
 </p>
