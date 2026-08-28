@@ -25,7 +25,8 @@ This post walks through the cold start elimination experiments for the SwissAI m
 - [III. JIT Compilation](#iii-jit-compilation)
 - [IV. CUDA Graphs](#iv-cuda-graphs)
 - [V. CRIU](#v-criu)
-  - [Local results](#local-results)
+  - [1. CSCS](#cscs)
+  - [2. Local results](#local-results)
 
 
 ## I. Time Breakdown
@@ -334,7 +335,7 @@ We tested checkpoint/restore on a local machine with 2x RTX 3060 GPUs (12 GB eac
 *Results with 1x RTX 3060, 12 GB VRAM, 16 GB RAM, Ubuntu 22.04, SGLang v0.5.10* 
 | path | time to serving | speedup vs cold start | checkpoint time | explanation |
 |---|---|---|---|---|
-| cold launch (weights + JIT compile) | 109.8s | 1x | — | |
+| cold launch | 109.8s | 1x | — | |
 | naive restore | 23.3s | 4.72x | 34.7s (15GB snapshot) | Save everything, including the GPU weights. |
 | thin restore | 17.4s | 6.31x | 11.6s (4.6GB snapshot) | Free the model weights right before saving, then reload them from disk on restore. |
 
@@ -355,7 +356,7 @@ We could work around this at the application level. We would need to patch SGLan
 
 | path | time to serving | speedup vs cold start | checkpoint time |
 |---|---|---|---|
-| cold launch (weights + JIT compile) | 91.2s | 1x | — |
+| cold launch | 91.2s | 1x | — |
 | naive restore | 29.2s | 3.12x | 61.9s (29GB snapshot) |
 | thin restore | 19.8s | 4.62x | 18.1s (9.5GB snapshot) |
 
