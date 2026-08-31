@@ -53,7 +53,7 @@ For this experiment, we use `Llama-3.1-70B-Instruct` served with SGLang v0.5.10 
 | **total** | **629.79** | |
 
 
-*These breakdowns are highly variable — they depend on `capstor` contention, per-node differences, and other factors. The **appendix** compiles 3 runs of the baseline breakdown in different days with per-phase statistics (mean, stddev, min, max).* [TODO] add these.
+*These breakdowns are highly variable — they depend on `capstor` contention, per-node differences, and other factors. [This document](experiments/lustre-loading-exp/results/phase_stats.md) compiles 3 runs of the baseline breakdown on different days with per-phase statistics (mean, stddev, min, max).*
 
 
 As we can see, loading weights from persistent storage (`capstor/store`) is by far the most time-consuming step, with **72%** of the total cold start time. It is followed by CUDA graphs capture (`piecewise_cuda_graph_capture` + `cuda_graph_capture`) which is **17%**. The other steps account for around **11%** of the total cold start time and are mostly JIT compilation and Python package imports.
@@ -164,10 +164,7 @@ Equipped with this knowledge, we try the following:
 | /dev/shm staging + presharded + overlap | 9.7 | 47.0× | 179.0 |
 
 * To avoid corrupting our results with any kind of caching, we run the methods in **reverse order** of expected speed and on different nodes, meaning `/dev/shm + presharded + overlap` ran before the default loader experiment. 
-* Similarly to the previous section, these results are highly variable, so we provide 3 runs of each experiment (conducted on different days) in the appendix with statistics (mean, stddev, min, max). [TODO]
-
-
-[TODO] Add the logs of this experiment and the scripts to this repo. Also, add statistics for multiple runs of the same experiment in the appendix. /users/yboughizane/scratch/simple-serving-stack/experiments/lustre-loading-exp/results/meeting-sweep/bristen-2026-08-24-cpu128
+* Similarly to the previous section, these results are highly variable, so we provide 3 runs of each experiment (conducted on different days) in [this document](experiments/lustre-loading-exp/results/phase_stats.md) with statistics (mean, stddev, min, max).
 
 ### 3. Fast weight loading with servekit
 
