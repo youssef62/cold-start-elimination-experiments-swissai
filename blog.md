@@ -37,30 +37,30 @@ We first map the cold start steps to their wall-clock time to identify the bottl
 
 For this experiment, we use `Llama-3.1-70B-Instruct` served with SGLang v0.5.10 (image `lmsysorg/sglang:v0.5.10`) with tensor-parallel size 4 on a single Bristen cluster node, with weights loaded with the default sglang model loader. SML keeps models in `capstor/store`, which is a [Lustre](https://www.lustre.org/) file system.  
 
-([TODO]: add the code for this and logs to this repo. /users/yboughizane/scratch/simple-serving-stack/experiments/lustre-loading-exp/results/meeting-sweep/2026-08-21/phase1_3_e2e-mmap-80022-nid002293-profile.json)
+[`experiments/lustre-loading-exp/results/methods_sweep/bristen-2026-08-24-cpu128/phase1_3_e2e-mmap-80538-nid002805-profile.json`](experiments/lustre-loading-exp/results/methods_sweep/bristen-2026-08-24-cpu128/phase1_3_e2e-mmap-80538-nid002805-profile.json).
 
 | phase | duration_s | explanation |
 |---|---|---|
-| process_startup | 24.59 | Process launch, mostly Python `import`s |
-| tp_worker_spawn | 16.11 | Spawning the tensor-parallel worker processes |
-| torch_distributed_init | 3.13 | Initializing the NCCL / torch distributed process group |
-| unknown | 1.85 |  |
-| weight_loading | **652.19** | Reading the model weights from storage and copying them to GPU memory |
-| cuda_graph_capture | 31.96 | Capturing Decode CUDA graphs. In practice, this is mostly JIT compilation happening during the graph capture's forward passes.  |
-| piecewise_cuda_graph_capture | 82.79 | Capturing piecewise CUDA graphs (cuda graphs for prefill) |
-| http_bind | 1.89 | Binding the HTTP server socket |
-| warmup_request(JIT) | 15.00 | Warmup request that triggers remaining JIT kernel compilation |
-| **total** | **826.05** | |
+| process_startup | 28.44 | Process launch, mostly Python `import`s |
+| tp_worker_spawn | 16.59 | Spawning the tensor-parallel worker processes |
+| torch_distributed_init | 3.39 | Initializing the NCCL / torch distributed process group |
+| unknown | 2.03 |  |
+| weight_loading | **453.74** | Reading the model weights from storage and copying them to GPU memory |
+| cuda_graph_capture | 29.26 | Capturing Decode CUDA graphs. In practice, this is mostly JIT compilation happening during the graph capture's forward passes.  |
+| piecewise_cuda_graph_capture | 79.08 | Capturing piecewise CUDA graphs (cuda graphs for prefill) |
+| http_bind | 1.66 | Binding the HTTP server socket |
+| warmup_request(JIT) | 15.20 | Warmup request that triggers remaining JIT kernel compilation |
+| **total** | **629.79** | |
 
 
 *These breakdowns are highly variable — they depend on `capstor` contention, per-node differences, and other factors. The **appendix** compiles 3 runs of the baseline breakdown in different days with per-phase statistics (mean, stddev, min, max).* [TODO] add these.
 
 
-As we can see, loading weights from persistent storage (`capstor/store`) is by far the most time-consuming step, with **78%** of the total cold start time. It is followed by CUDA graphs capture (`piecewise_cuda_graph_capture` + `cuda_graph_capture`) which is **13%**. The other steps account for around **9%** of the total cold start time and are mostly JIT compilation and Python package imports.
+As we can see, loading weights from persistent storage (`capstor/store`) is by far the most time-consuming step, with **72%** of the total cold start time. It is followed by CUDA graphs capture (`piecewise_cuda_graph_capture` + `cuda_graph_capture`) which is **17%**. The other steps account for around **11%** of the total cold start time and are mostly JIT compilation and Python package imports.
 
 ## II. Weight Loading
 
-Weight loading is clearly the bottleneck. **652.19** seconds for a 70B (130 GB) model is a lot: that is only **0.2 GiB/s**. [Capstor's aggregate theoretical bandwidth](https://docs.cscs.ch/alps/storage/) (across all users and jobs) is a whopping **1.19 TB/s**, and we are connected to it with [4 HPE Cray Slingshot-11 NICs](https://docs.cscs.ch/alps/hardware/#alps-high-speed-network) with a combined bandwidth of **4 x 23.28 GiB/s**, so that NIC bandwidth should be our bottleneck. We should be able to do much better than **0.2 GiB/s**.
+Weight loading is clearly the bottleneck. **453.74** seconds for a 70B (130 GB) model is a lot: that is only **0.29 GiB/s**. [Capstor's aggregate theoretical bandwidth](https://docs.cscs.ch/alps/storage/) (across all users and jobs) is a whopping **1.19 TB/s**, and we are connected to it with [4 HPE Cray Slingshot-11 NICs](https://docs.cscs.ch/alps/hardware/#alps-high-speed-network) with a combined bandwidth of **4 x 23.28 GiB/s**, so that NIC bandwidth should be our bottleneck. We should be able to do much better than **0.29 GiB/s**.
 
 So let's try to understand:
 
@@ -82,14 +82,14 @@ Our hypothesis is that this triggers a **major page fault** for each page touche
 
 To check this, we run the exact same experiment with SGLang's `--weight-loader-disable-mmap`, which skips `mmap` entirely. 
 
-We get **45.7s** for weight loading, which is **14x faster** than the default loader and corresponds to **2.8GiB/s**. 
+We get **45.7s** for weight loading, which is **9.9x faster** than the default loader and corresponds to **2.8GiB/s**. 
 
 > **Lesson.** For weight loading using an HDD-backed Lustre file system, using `mmap` is a bad idea. The simple `--weight-loader-disable-mmap` flag is a huge improvement.
 
 
 This still leaves another possible explanation: maybe it's not `mmap` itself but the many small host-to-device copies it causes. Let's try another one-flag method that does not use `mmap`: `fastsafetensors` [^6] (`--load-format fastsafetensors`) partitions files across TP ranks; each TP process reads a file with `pread` and then exchanges the weights with other TP ranks using NCCL communication. *Once all weights are on each GPU, tensors are parsed one by one directly in GPU memory*. This eliminates the need for small tensor copies from host to device. If the small copies were the real bottleneck, this should beat `--weight-loader-disable-mmap`.
 
-We get **59.1s** for weight loading, which is **11x faster** than the default loader but worse than `--weight-loader-disable-mmap`. This confirms again that the bottleneck was `mmap` and not the small tensor copies from host to device.
+We get **59.1s** for weight loading, which is **7.7x faster** than the default loader but worse than `--weight-loader-disable-mmap`. This confirms again that the bottleneck was `mmap` and not the small tensor copies from host to device.
 
 This is a huge improvement and shows that `mmap` is not suitable for weight loading on Lustre file systems. However, **2.8GiB/s** is still far from the theoretical maximum of **4x23.28 GiB/s**. Let's see if we can do better.
 
