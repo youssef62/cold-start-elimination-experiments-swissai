@@ -37,7 +37,6 @@ We first map the cold start steps to their wall-clock time to identify the bottl
 
 For this experiment, we use `Llama-3.1-70B-Instruct` served with SGLang v0.5.10 (image `lmsysorg/sglang:v0.5.10`) with tensor-parallel size 4 on a single Bristen cluster node, with weights loaded with the default sglang model loader. SML keeps models in `capstor/store`, which is a [Lustre](https://www.lustre.org/) file system.  
 
-[`experiments/lustre-loading-exp/results/methods_sweep/bristen-2026-08-24-cpu128/phase1_3_e2e-mmap-80538-nid002805-profile.json`](experiments/lustre-loading-exp/results/methods_sweep/bristen-2026-08-24-cpu128/phase1_3_e2e-mmap-80538-nid002805-profile.json).
 
 | phase | duration_s | explanation |
 |---|---|---|
