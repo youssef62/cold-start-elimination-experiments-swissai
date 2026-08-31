@@ -179,8 +179,6 @@ servekit launch --servekit-artifact-path <dir> \
 `servekit` also offers several utilities, such as `servekit profile`, `servekit bench` and `servekit verify`, to profile a cold start, benchmark a running server (useful to check that throughput is not affected by the optimizations), and verify that the server produces the same numbers as a trusted reference (useful for correctness checks: correctness is not affected by the optimizations). You can find documentation for these commands in the [servekit README](https://github.com/eth-easl/servekit/blob/main/README.md).
 
 
-[TODO] Add these logs and scripts to the repo: `experiments/servekit-eval/results/results.md`
-
 **Comprehensive results**
 
 We evaluate `servekit` against the default loader, `--weight-loader-disable-mmap` and `--load-format fastsafetensors` on multiple models. 
