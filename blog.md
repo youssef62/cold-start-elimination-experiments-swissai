@@ -63,7 +63,7 @@ As we can see, loading weights from persistent storage (`capstor/store`) is by f
 
 ## II. Weight Loading
 
-Weight loading is clearly the bottleneck. **453.74** seconds for a 70B (130 GB) model is a lot: that is only **0.29 GiB/s**. [Capstor's aggregate theoretical bandwidth](https://docs.cscs.ch/alps/storage/) (across all users and jobs) is a whopping **1.19 TB/s**, and we are connected to it with [4 HPE Cray Slingshot-11 NICs](https://docs.cscs.ch/alps/hardware/#alps-high-speed-network) with a combined bandwidth of **4 x 23.28 GiB/s**, so that NIC bandwidth should be our bottleneck. We should be able to do much better than **0.29 GiB/s**.
+Weight loading is clearly the bottleneck. **453.74** seconds for a 70B (141 GB) model is a lot: that is only **0.29 GiB/s**. [Capstor's aggregate theoretical bandwidth](https://docs.cscs.ch/alps/storage/) (across all users and jobs) is a whopping **1.19 TB/s**, and we are connected to it with [4 HPE Cray Slingshot-11 NICs](https://docs.cscs.ch/alps/hardware/#alps-high-speed-network) with a combined bandwidth of **4 x 23.28 GiB/s**, so that NIC bandwidth should be our bottleneck. We should be able to do much better than **0.29 GiB/s**.
 
 So let's try to understand:
 
@@ -139,7 +139,7 @@ Throughput scales close to linearly with reader count up to 8, then keeps climbi
 > **Lesson.** To maximize bandwidth on Lustre storage with `O_DIRECT` reads (no page cache), we need parallelism both across OSTs and within a single OST.
 
 Equipped with this knowledge, we try the following:
-* Load in parallel (60 processes per file, which is maybe too much) from Lustre to `/dev/shm` (RAM), and then use SGLang's default loader from `/dev/shm` to GPU. The staging takes `7s`, which is more than **18 GiB/s**, already much better than everything we have seen before. The weight loadißng takes `20s`, which is `> 6 GiB/s`. Overall, this is a **16x speedup** over the default loader.
+* Load in parallel (60 processes per file, which is maybe too much) from Lustre to `/dev/shm` (RAM), and then use SGLang's default loader from `/dev/shm` to GPU. The staging takes `7s`, which is more than **18 GiB/s**, already much better than everything we have seen before. The weight loading takes `20s`, which is `> 6 GiB/s`. Overall, this is a **16x speedup** over the default loader.
 
 <p align="center">
   <img src="assets/parallel-reads-lustre.png" alt="Parallel processes read file chunks from different OSTs on Lustre into /dev/shm, which SGLang then reads from" width="70%">
