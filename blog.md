@@ -92,7 +92,7 @@ We get **59.1s** for weight loading, which is **7.7x faster** than the default l
 
 This is a huge improvement and shows that `mmap` is not suitable for weight loading on Lustre file systems. However, **2.8GiB/s** is still far from the theoretical maximum of **4x23.28 GiB/s**. Let's see if we can do better.
 
-- Remark. The no-mmap techniques are very sensitive to the number of CPUs. ([TODO]: add an experiment for this.)
+<!-- - Remark. The no-mmap techniques are very sensitive to the number of CPUs. ([TODO]: add an experiment for this.) -->
 
 
 
@@ -257,7 +257,7 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 
 ## III. JIT Compilation
 
-With weight loading fixed, we will take a look at `cuda_graph_capture` (28s) and `warmup_request(JIT)` (15s). While the latter is clearly a JIT compilation phase, the former is a bit more subtle: it is a graph capture phase that triggers JIT compilation during the forward passes of the graph capture. JIT compilation is expensive but simple to cache! SGLang already offers some environment variables to specify a cache directory for the JIT compilation artifacts:
+With weight loading fixed, we will take a look at `piecewise_cuda_graph_capture` (also reported as `prefill_cuda_graph_capture` below, 79s) and `warmup_request(JIT)` (15s). While the latter is clearly a JIT compilation phase, the former is a bit more subtle: it is the prefill graph capture phase, and a large part of its time is actually JIT compilation happening during the graph capture's forward passes, not the capture itself. JIT compilation is expensive but simple to cache! SGLang already offers some environment variables to specify a cache directory for the JIT compilation artifacts:
 
 * `TRITON_CACHE_DIR`: compiled Triton kernels (PTX/cubin) and autotuning results.
 * `TVM_FFI_CACHE_DIR`: compiled `.so`s from FlashInfer's TVM-FFI JIT backend.
@@ -267,9 +267,25 @@ By default, these are set to `$HOME/.cache/triton`, `$HOME/.cache/tvm-ffi` and `
 
 We persist these to `--servekit-artifact-path` (the same path where we persist the presharded weights). In SML, we expect the first model run that prepares the model to be done by a maintainer that has write access to this path. However, users will not necessarily have write access to this path; if we naively set their cache directories to it, they will try to write and fail. So we made each launch copy these JIT cache directories to a temporary directory in `/tmp` and set the environment variables to point there. This way, users can read from the persistent cache but write to their own temporary cache. We also made sure these caches work across nodes. 
 
-IMPORTANT [TODO] : Add before and after jit caching eval.
+To measure the effect, we ran an experiment on `Llama-3.1-70B-Instruct` TP4 and sglang5.16 on two separate Bristen nodes, one with caching enabled and one without. The results are as follows:
 
-> **Lesson.** JIT compilation is easy to cache, offers non-negligible speedups (~20s) and is added to `servekit`.
+| phase | cold (s) | warm (s) |
+|---|---|---|
+| process_startup | 46.99 | 33.64 |
+| tp_worker_spawn | 32.85 | 29.78 |
+| torch_distributed_init | 19.54 | 2.74 |
+| unknown | 5.08 | 4.13 |
+| weight_loading | 14.15 | 14.11 |
+| kv_cache_alloc | 3.10 | 3.19 |
+| prefill_cuda_graph_capture | 73.43 | 43.31 |
+| cuda_graph_capture | 12.86 | 13.12 |
+| http_bind | 0.67 | 0.71 |
+| warmup_request(JIT) | 8.92 | 1.51 |
+| **total cold start** | **217.57** | **146.20** |
+
+As expected, the JIT-heavy phases shrink the most: `warmup_request(JIT)` (-83%) and `prefill_cuda_graph_capture` (-41%). Overall, JIT caching cuts total cold start from 217.57s to 146.20s, a **33%** reduction.
+
+> **Lesson.** JIT compilation is easy to cache, offers non-negligible speedups (**~71s**, 33% of total cold start) and is added to `servekit`.
 
 ## IV. CUDA Graphs
 

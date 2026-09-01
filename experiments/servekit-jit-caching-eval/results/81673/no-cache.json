@@ -1,0 +1,63 @@
+{
+  "command": "python -m sglang.launch_server --model-path /capstor/store/cscs/swissai/infra01/hf_models/models/meta-llama/Llama-3.1-70B-Instruct --served-model-name meta-llama/Llama-3.1-70B-Instruct --tensor-parallel-size 4 --host 0.0.0.0 --port 8080 --trust-remote-code --context-length 32768 --mem-fraction-static 0.85 --random-seed 42 --load-format sharded_state",
+  "framework": "sglang",
+  "started_at": 1788186123.099762,
+  "ready_at": 1788186340.6664112,
+  "success": true,
+  "total_duration_s": 217.57,
+  "phases": [
+    {
+      "name": "process_startup",
+      "duration_s": 46.99,
+      "source": "wall_clock"
+    },
+    {
+      "name": "tp_worker_spawn",
+      "duration_s": 32.85,
+      "source": "wall_clock"
+    },
+    {
+      "name": "torch_distributed_init",
+      "duration_s": 19.54,
+      "source": "engine_reported"
+    },
+    {
+      "name": "unknown",
+      "duration_s": 5.08,
+      "source": "wall_clock"
+    },
+    {
+      "name": "weight_loading",
+      "duration_s": 14.15,
+      "source": "engine_reported"
+    },
+    {
+      "name": "kv_cache_alloc",
+      "duration_s": 3.1,
+      "source": "wall_clock"
+    },
+    {
+      "name": "prefill_cuda_graph_capture",
+      "duration_s": 73.43,
+      "source": "engine_reported"
+    },
+    {
+      "name": "cuda_graph_capture",
+      "duration_s": 12.86,
+      "source": "engine_reported"
+    },
+    {
+      "name": "http_bind",
+      "duration_s": 0.67,
+      "source": "wall_clock"
+    },
+    {
+      "name": "warmup_request(JIT)",
+      "duration_s": 8.92,
+      "source": "wall_clock"
+    }
+  ],
+  "benchmark": null,
+  "node_rank": null,
+  "nnodes": null
+}
