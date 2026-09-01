@@ -37,26 +37,11 @@ We first map the cold start steps to their wall-clock time to identify the bottl
 
 For this experiment, we use `Llama-3.1-70B-Instruct` served with SGLang v0.5.10 (image `lmsysorg/sglang:v0.5.10`) with tensor-parallel size 4 on a single Bristen cluster node, with weights loaded with the default sglang model loader. SML keeps models in `capstor/store`, which is a [Lustre](https://www.lustre.org/) file system.  
 
-
-| phase | duration_s | explanation |
-|---|---|---|
-| process_startup | 28.44 | Process launch, mostly Python `import`s |
-| tp_worker_spawn | 16.59 | Spawning the tensor-parallel worker processes |
-| torch_distributed_init | 3.39 | Initializing the NCCL / torch distributed process group |
-| unknown | 2.03 |  |
-| weight_loading | **453.74** | Reading the model weights from storage and copying them to GPU memory |
-| cuda_graph_capture | 29.26 | Capturing Decode CUDA graphs. In practice, this is mostly JIT compilation happening during the graph capture's forward passes.  |
-| piecewise_cuda_graph_capture | 79.08 | Capturing piecewise CUDA graphs (cuda graphs for prefill) |
-| http_bind | 1.66 | Binding the HTTP server socket |
-| warmup_request(JIT) | 15.20 | Warmup request that triggers remaining JIT kernel compilation |
-| **total** | **629.79** | |
-
-
-*These breakdowns are highly variable — they depend on `capstor` contention, per-node differences, and other factors. [This document](experiments/lustre-loading-exp/results/phase_stats.md) compiles 3 runs of the baseline breakdown on different days with per-phase statistics (mean, stddev, min, max).*
-
 <p align="center">
   <img src="assets/time_breakdown.png" alt="Stacked bar of cold start phase durations, dominated by weight_loading at 72% of the 629.79s total" width="85%">
 </p>
+
+*These breakdowns are highly variable: they depend on `capstor` contention, per-node differences, and other factors. [This document](experiments/lustre-loading-exp/results/phase_stats.md) compiles 3 runs of the baseline breakdown on different days with per-phase statistics (mean, stddev, min, max).*
 
 
 As we can see, loading weights from persistent storage (`capstor/store`) is by far the most time-consuming step, with **72%** of the total cold start time. It is followed by CUDA graphs capture (`piecewise_cuda_graph_capture` + `cuda_graph_capture`) which is **17%**. The other steps account for around **11%** of the total cold start time and are mostly JIT compilation and Python package imports.
