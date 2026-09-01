@@ -118,25 +118,25 @@ However, single OSTs also benefit from having many requests in flight.
 To answer this, we will experiment with `dd iflag=direct`. This command lets us read files from disk without going through the page cache. We can use it as follows: `dd iflag=direct if=input.bin of=output.bin bs=16M`, where `bs=16M` is the block size, i.e. the amount of data read from disk in one request. In our experiment, we use `bs=16M` and read to `/dev/null` to measure the read speed. We study the effect of the number of parallel `dd` processes on the read speed. 
 
 ```bash
-per=$(( 64 / nprocess ))            
+per=$(( 256 / nprocess ))           
 t0=$(date +%s.%N)
 for ((i=0;i<nprocess;i++)); do
   dd if="${SICK}" of=/dev/null bs=16M skip=$((i*per)) count=$per iflag=direct status=none &
 done
 ```
 
-We measure this on a single 5GB shard (`bs=16M`, `O_DIRECT`, `dev/null`), sweeping the number of parallel `dd` processes reading disjoint, contiguous byte ranges of the same file:
+We measure this on a single-striped 4.6 GB shard, reading a 4 GiB window of it (`bs=16M`, `O_DIRECT`, to `/dev/null`) while sweeping the number of parallel `dd` processes over disjoint, contiguous byte ranges of the same file. Each point is the median of 3 runs; bars span min to max:
 
 <p align="center">
-  <img src="assets/ost_queue_depth.png" alt="OST read throughput scales with the number of parallel readers, then flattens near the NIC line rate" width="40%">
+  <img src="assets/ost_queue_depth.png" alt="OST read throughput keeps scaling with the number of parallel readers" width="40%">
 </p>
 
-Throughput scales close to linearly with reader count up to 16, then flattens. With many processes, we are able to keep many RPCs in flight, improving the bandwidth. 
+Throughput scales close to linearly with reader count up to 8, then keeps climbing sublinearly: 64 readers reach **6.7 GB/s**, an **18x** speedup over a single reader, and the curve has still not flattened. With many processes, we are able to keep many RPCs in flight, improving the bandwidth. 
 
 > **Lesson.** To maximize bandwidth on Lustre storage with `O_DIRECT` reads (no page cache), we need parallelism both across OSTs and within a single OST.
 
 Equipped with this knowledge, we try the following:
-* Load in parallel (60 processes per file, which is maybe too much) from Lustre to `/dev/shm` (RAM), and then use SGLang's default loader from `/dev/shm` to GPU. The staging takes `7s`, which is more than **18 GiB/s**, already much better than everything we have seen before. The weight loading takes `20s`, which is `> 6 GiB/s`. Overall, this is a **16x speedup** over the default loader.
+* Load in parallel (60 processes per file, which is maybe too much) from Lustre to `/dev/shm` (RAM), and then use SGLang's default loader from `/dev/shm` to GPU. The staging takes `7s`, which is more than **18 GiB/s**, already much better than everything we have seen before. The weight loadißng takes `20s`, which is `> 6 GiB/s`. Overall, this is a **16x speedup** over the default loader.
 
 <p align="center">
   <img src="assets/parallel-reads-lustre.png" alt="Parallel processes read file chunks from different OSTs on Lustre into /dev/shm, which SGLang then reads from" width="70%">

@@ -1,0 +1,27 @@
+job=81985 node=nid002324 file=/capstor/store/cscs/swissai/infra01/hf_models/models/meta-llama/Llama-3.1-70B-Instruct/model-00001-of-00030.safetensors total_mb=4096 reps=3 started=2026-09-01T10:08:16+02:00
+stripe: lmm_stripe_count:  1 lmm_stripe_offset: 117  
+
+ readers         MB/s
+       1        377.1
+       1        350.1
+       1        362.0
+       2        625.3
+       2        647.8
+       2        628.4
+       4       1157.1
+       4       1085.9
+       4       1101.9
+       8       1897.5
+       8       1758.8
+       8       2344.0
+      16       2715.0
+      16       3789.4
+      16       2829.2
+      32       3774.3
+      32       4010.6
+      32       5502.5
+      64       6670.4
+      64       6409.6
+      64       7415.5
+
+finished=2026-09-01T10:09:36+02:00

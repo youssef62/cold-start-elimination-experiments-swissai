@@ -4,6 +4,7 @@
 Usage: plot.py <sweep.out> [out_png]
 """
 import re
+import statistics
 import sys
 
 import matplotlib
@@ -20,16 +21,21 @@ plt.rcParams.update({
 out_path = sys.argv[1]
 png_path = sys.argv[2] if len(sys.argv) > 2 else "sweep.png"
 
-readers, mbps = [], []
+runs = {}
 with open(out_path) as f:
     for line in f:
         m = re.match(r"\s*(\d+)\s+([\d.]+)\s*$", line)
         if m:
-            readers.append(int(m.group(1)))
-            mbps.append(float(m.group(2)))
+            runs.setdefault(int(m.group(1)), []).append(float(m.group(2)))
+
+readers = sorted(runs)
+mbps = [statistics.median(runs[r]) for r in readers]
+lo = [mbps[i] - min(runs[r]) for i, r in enumerate(readers)]
+hi = [max(runs[r]) - mbps[i] for i, r in enumerate(readers)]
 
 fig, ax = plt.subplots(figsize=(5.5, 4))
-ax.plot(readers, mbps, marker="o", linewidth=2, markersize=7, color="#1f4e8c")
+ax.errorbar(readers, mbps, yerr=[lo, hi], marker="o", linewidth=2, markersize=7,
+            color="#1f4e8c", capsize=3, elinewidth=1.2)
 ax.set_xscale("log", base=2)
 ax.set_xticks(readers)
 ax.set_xticklabels(readers)
