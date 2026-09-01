@@ -171,14 +171,14 @@ Equipped with this knowledge, we try the following:
 > ⚠️ **Warning.** We notice that, in general, `--cpus-per-task` can have a large impact on weight loading speed. The experiments above were all run with `--cpus-per-task=128`, i.e. on a full node. Here are **--weight-loader-disable-mmap** and the **/dev/shm staging + presharded + overlap** swept over the CPU budget:
 >
 >
-> | CPUs | `nommap` weight_loading (s) | overlap stage + weight_loading (s) |
-> |---|---|---|
-> | 16 | 192.2 | 29.2 (stage) + 12.2 |
-> | 32 | 189.6 | 34.1 (stage) + 11.2 |
-> | 64 | 102.9 | 21.5 (stage) + 11.2 |
-> | 128 | 48.9 | 15.2 (stage) + 9.3 |
+> | CPUs | `nommap` weight_loading (s) | `nommap` total (s) | overlap stage + weight_loading (s) | overlap total (s) |
+> |---|---|---|---|---|
+> | 16 | 192.2 | 373.1 | 29.2 (stage) + 12.2 | 227.9 |
+> | 32 | 189.6 | 376.9 | 34.1 (stage) + 11.2 | 222.2 |
+> | 64 | 102.9 | 292.9 | 21.5 (stage) + 11.2 | 191.0 |
+> | 128 | 48.9 | 216.6 | 15.2 (stage) + 9.3 | 184.2 |
 >
-> Both are sensitive to CPU budget. `--weight-loader-disable-mmap` scales almost **linearly** with number of cpus. In this case, it's important to use a full node. Our technique, is affected by CPU budget, but not significantly. 
+> Both are sensitive to CPU budget. `--weight-loader-disable-mmap`'s weight loading time scales almost **linearly** with number of cpus. In this case, it's important to use a full node. Our technique, is affected by CPU budget, but not significantly. 
 
 ### 3. Fast weight loading with servekit
 
