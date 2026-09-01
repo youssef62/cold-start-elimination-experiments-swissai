@@ -92,6 +92,9 @@ set -euo pipefail
 
 # Outside the measured window, exactly as in phase 6.
 pip install -e "${SERVEKIT_DIR}" --no-build-isolation --no-deps -q
+# the only proof the cgroup affinity limit took effect: under --exclusive sacct
+# reports the whole node regardless of --cpus-per-task
+echo "cpus_per_task=${SLURM_CPUS_PER_TASK} nproc=\$(nproc)"
 
 mkdir -p "${SHM_DEST}"
 
@@ -155,7 +158,9 @@ srun --nodes=1 --ntasks=1 --ntasks-per-node=1 \
 echo
 echo "=== result (overlap) ==="
 if [ -f "${PROFILE_OUT}" ] && [ -f "${TIMING}" ]; then
-  python3 - "${PROFILE_OUT}" "${TIMING}" "${STAGE_LOG}" <<'PY'
+  PY_BIN="$(command -v python3 || true)"
+  "${PY_BIN:-/usr/bin/python3}" -c '' 2>/dev/null || PY_BIN=/usr/bin/python3
+  "${PY_BIN}" - "${PROFILE_OUT}" "${TIMING}" "${STAGE_LOG}" <<'PY' || true
 import json, sys, re
 
 prof, timing, stagelog = sys.argv[1:4]
@@ -199,7 +204,7 @@ else:
     print('  INVALID: loader opened weight files %.2f s BEFORE the stage finished' % -slack)
     print('           -> discard this run; it read partially-staged bytes.')
 print()
-b = d.get('benchmark', {}).get('throughput', {})
+b = (d.get('benchmark') or {}).get('throughput') or {}
 print('  throughput         = %s tok/s, %s/%s ok, errors=%s'
       % (b.get('output_tok_per_s'), b.get('completed'), b.get('requests'), b.get('errors')))
 print()

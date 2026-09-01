@@ -54,6 +54,10 @@ For this experiment, we use `Llama-3.1-70B-Instruct` served with SGLang v0.5.10 
 
 *These breakdowns are highly variable — they depend on `capstor` contention, per-node differences, and other factors. [This document](experiments/lustre-loading-exp/results/phase_stats.md) compiles 3 runs of the baseline breakdown on different days with per-phase statistics (mean, stddev, min, max).*
 
+<p align="center">
+  <img src="assets/time_breakdown.png" alt="Stacked bar of cold start phase durations, dominated by weight_loading at 72% of the 629.79s total" width="85%">
+</p>
+
 
 As we can see, loading weights from persistent storage (`capstor/store`) is by far the most time-consuming step, with **72%** of the total cold start time. It is followed by CUDA graphs capture (`piecewise_cuda_graph_capture` + `cuda_graph_capture`) which is **17%**. The other steps account for around **11%** of the total cold start time and are mostly JIT compilation and Python package imports.
 
@@ -92,7 +96,6 @@ We get **59.1s** for weight loading, which is **7.7x faster** than the default l
 
 This is a huge improvement and shows that `mmap` is not suitable for weight loading on Lustre file systems. However, **2.8GiB/s** is still far from the theoretical maximum of **4x23.28 GiB/s**. Let's see if we can do better.
 
-<!-- - Remark. The no-mmap techniques are very sensitive to the number of CPUs. ([TODO]: add an experiment for this.) -->
 
 
 
@@ -165,16 +168,17 @@ Equipped with this knowledge, we try the following:
 * To avoid corrupting our results with any kind of caching, we run the methods in **reverse order** of expected speed and on different nodes, meaning `/dev/shm + presharded + overlap` ran before the default loader experiment. 
 * Similarly to the previous section, these results are highly variable, so we provide 3 runs of each experiment (conducted on different days) in [this document](experiments/lustre-loading-exp/results/phase_stats.md) with statistics (mean, stddev, min, max).
 
-> ⚠️ **Warning.** We notice that, in general, `--cpus-per-task` has a large impact on weight loading speed. The experiments above were all run with `--cpus-per-task=128`, i.e. on a full node. As an example of the effect, here is `--weight-loader-disable-mmap` (Llama-3.1-70B-Instruct, TP4) swept over the CPU budget:
+> ⚠️ **Warning.** We notice that, in general, `--cpus-per-task` can have a large impact on weight loading speed. The experiments above were all run with `--cpus-per-task=128`, i.e. on a full node. Here are **--weight-loader-disable-mmap** and the **/dev/shm staging + presharded + overlap** swept over the CPU budget:
 >
-> | CPUs | weight_loading (s) | speedup vs default loader |
+>
+> | CPUs | `nommap` weight_loading (s) | overlap stage + weight_loading (s) |
 > |---|---|---|
-> | 16 | 192.2 | 2.4× |
-> | 32 | 189.6 | 2.4× |
-> | 64 | 102.9 | 4.4× |
-> | 128 | 48.9 | 9.3× |
+> | 16 | 192.2 | 29.2 (stage) + 12.2 |
+> | 32 | 189.6 | 34.1 (stage) + 11.2 |
+> | 64 | 102.9 | 21.5 (stage) + 11.2 |
+> | 128 | 48.9 | 15.2 (stage) + 9.3 |
 >
-> So it is really important to set `--cpus-per-task` to use a full node. 
+> Both are sensitive to CPU budget. `--weight-loader-disable-mmap` scales almost **linearly** with number of cpus. In this case, it's important to use a full node. Our technique, is affected by CPU budget, but not significantly. 
 
 ### 3. Fast weight loading with servekit
 
@@ -269,7 +273,7 @@ We persist these to `--servekit-artifact-path` (the same path where we persist t
 
 To measure the effect, we ran an experiment on `Llama-3.1-70B-Instruct` TP4 and sglang5.16 on two separate Bristen nodes, one with caching enabled and one without. The results are as follows:
 
-| phase | cold (s) | warm (s) |
+| phase | cold (s) | JIT cached (s) |
 |---|---|---|
 | process_startup | 46.99 | 33.64 |
 | tp_worker_spawn | 32.85 | 29.78 |
@@ -277,15 +281,17 @@ To measure the effect, we ran an experiment on `Llama-3.1-70B-Instruct` TP4 and 
 | unknown | 5.08 | 4.13 |
 | weight_loading | 14.15 | 14.11 |
 | kv_cache_alloc | 3.10 | 3.19 |
-| prefill_cuda_graph_capture | 73.43 | 43.31 |
+| **prefill_cuda_graph_capture** | **73.43** | **43.31** |
 | cuda_graph_capture | 12.86 | 13.12 |
 | http_bind | 0.67 | 0.71 |
-| warmup_request(JIT) | 8.92 | 1.51 |
+| **warmup_request(JIT)** | **8.92** | **1.51** |
 | **total cold start** | **217.57** | **146.20** |
 
-As expected, the JIT-heavy phases shrink the most: `warmup_request(JIT)` (-83%) and `prefill_cuda_graph_capture` (-41%). Overall, JIT caching cuts total cold start from 217.57s to 146.20s, a **33%** reduction.
+As expected, the JIT-heavy phases shrink the most: `warmup_request(JIT)` (-83%) and `prefill_cuda_graph_capture` (-41%). `torch_distributed_init` also drops sharply (19.54s to 2.74s), this is most likely run-to-run noise in the network-fabric. 
 
-> **Lesson.** JIT compilation is easy to cache, offers non-negligible speedups (**~71s**, 33% of total cold start) and is added to `servekit`.
+Excluding that noise, JIT caching saves **~54.6s**, a **25%** reduction in total cold start time.
+
+> **Lesson.** JIT compilation is easy to cache, offers non-negligible speedups (**~55s**, 25% of total cold start) and is added to `servekit`.
 
 ## IV. CUDA Graphs
 
