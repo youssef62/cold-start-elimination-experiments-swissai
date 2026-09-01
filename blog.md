@@ -165,6 +165,17 @@ Equipped with this knowledge, we try the following:
 * To avoid corrupting our results with any kind of caching, we run the methods in **reverse order** of expected speed and on different nodes, meaning `/dev/shm + presharded + overlap` ran before the default loader experiment. 
 * Similarly to the previous section, these results are highly variable, so we provide 3 runs of each experiment (conducted on different days) in [this document](experiments/lustre-loading-exp/results/phase_stats.md) with statistics (mean, stddev, min, max).
 
+> ⚠️ **Warning.** We notice that, in general, `--cpus-per-task` has a large impact on weight loading speed. The experiments above were all run with `--cpus-per-task=128`, i.e. on a full node. As an example of the effect, here is `--weight-loader-disable-mmap` (Llama-3.1-70B-Instruct, TP4) swept over the CPU budget:
+>
+> | CPUs | weight_loading (s) | speedup vs default loader |
+> |---|---|---|
+> | 16 | 192.2 | 2.4× |
+> | 32 | 189.6 | 2.4× |
+> | 64 | 102.9 | 4.4× |
+> | 128 | 48.9 | 9.3× |
+>
+> So it is really important to set `--cpus-per-task` to use a full node. 
+
 ### 3. Fast weight loading with servekit
 
 I packaged the above ideas into a package called `servekit` that can be used to launch SGLang servers with fast cold starts. The goal is for `servekit` to be a wrapper around SGLang that implements cold start elimination optimizations. Currently, `servekit` implements fast weight loading and JIT kernel caching (more on this later). 

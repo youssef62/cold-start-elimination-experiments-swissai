@@ -43,6 +43,9 @@ echo "started=$(date --iso-8601=seconds)"
 INNER_CMD=$(cat <<EOF
 set -euo pipefail
 pip install -e "${SERVEKIT_DIR}" --no-build-isolation --no-deps -q
+# the only proof the cgroup affinity limit took effect: under --exclusive sacct
+# reports the whole node regardless of --cpus-per-task
+echo "cpus_per_task=${SLURM_CPUS_PER_TASK} nproc=\$(nproc)"
 servekit profile --out "${PROFILE_OUT}" \
   -- \
   python -m sglang.launch_server \
