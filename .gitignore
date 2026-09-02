@@ -3,3 +3,4 @@ __pycache__/
 core_*
 *.log
 experiments/servekit-eval/results/
+blog.pdf
