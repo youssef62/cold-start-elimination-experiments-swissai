@@ -47,28 +47,31 @@ SCALE = ROW_IN / LANE_DATA
 Y_MAIN, Y_STAGE = 0.30, -0.30
 YLIM = 0.62
 
-FIG_W = 9.0
+# shared time axis: 1 second is the same width in this plot and in
+# plot_time_breakdown.py, so the two bars can be compared directly. On this
+# scale the whole arm is only ~30% of the baseline's width.
+IN_PER_SEC = 8.7 / 630.0
+FIG_W = 9.0  # same canvas width in both plots
 M_TOP, M_LEFT, M_RIGHT, M_BOT = 0.5, 1.5, 0.15, 0.10
 GAP, LEGEND_IN = 0.12, 0.78
 
+axes_w = total * IN_PER_SEC
 axes_h = 2 * YLIM * SCALE
 fig_h = M_TOP + axes_h + GAP + LEGEND_IN + M_BOT
 fig = plt.figure(figsize=(FIG_W, fig_h))
 ax = fig.add_axes([
     M_LEFT / FIG_W,
     (M_BOT + LEGEND_IN + GAP) / fig_h,
-    (FIG_W - M_LEFT - M_RIGHT) / FIG_W,
+    axes_w / FIG_W,
     axes_h / fig_h,
 ])
 
+# no inline segment labels: at the shared time scale no segment is wide
+# enough to hold its name, so everything is carried by the legend.
 left = 0.0
 for name, dur, color in phases:
     ax.barh(Y_MAIN, dur, left=left, height=BAR_H, color=color,
             edgecolor="white", linewidth=1.2)
-    pct = dur / total * 100
-    if pct >= 30:
-        ax.text(left + dur / 2, Y_MAIN, f"{name}  ({dur:g}s, {pct:.0f}%)",
-                ha="center", va="center", fontsize=10, color="#1a1a19", clip_on=False)
     left += dur
 
 ax.barh(Y_STAGE, STAGE_DUR, height=BAR_H, color="#00a0b0",
@@ -81,10 +84,12 @@ ax.set_xlim(0, total)
 ax.set_ylim(-YLIM, YLIM)
 ax.set_yticks([Y_MAIN, Y_STAGE])
 ax.set_yticklabels(["engine start", "staging"])
+ax.tick_params(axis="y", length=0)
 ax.set_xticks([])
 for s in ("top", "right", "left", "bottom"):
     ax.spines[s].set_visible(False)
-ax.set_title(f"/dev/shm staging + presharded + overlap, cold start {total:.1f}s", pad=12)
+fig.suptitle(f"/dev/shm staging + presharded + overlap, cold start {total:.1f}s",
+             y=1 - 0.28 / fig_h, fontsize=14)
 
 legend_handles = [plt.Rectangle((0, 0), 1, 1, color=c) for _, _, c in phases]
 legend_labels = [f"{n} ({d:g}s, {d/total*100:.1f}%)" for n, d, _ in phases]

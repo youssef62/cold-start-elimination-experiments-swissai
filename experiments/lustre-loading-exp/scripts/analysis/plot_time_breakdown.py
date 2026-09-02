@@ -34,17 +34,21 @@ SCALE = ROW_IN / LANE_DATA
 
 YLIM = 0.26
 
-FIG_W = 9.0
+# shared time axis: 1 second is the same width in this plot and in
+# plot_overlap_breakdown.py, so the two bars can be compared directly.
+IN_PER_SEC = 8.7 / 630.0
+FIG_W = 9.0  # same canvas width in both plots
 M_TOP, M_LEFT, M_RIGHT, M_BOT = 0.5, 0.18, 0.15, 0.10
 GAP, LEGEND_IN = 0.12, 0.78
 
+axes_w = total * IN_PER_SEC
 axes_h = 2 * YLIM * SCALE
 fig_h = M_TOP + axes_h + GAP + LEGEND_IN + M_BOT
 fig = plt.figure(figsize=(FIG_W, fig_h))
 ax = fig.add_axes([
     M_LEFT / FIG_W,
     (M_BOT + LEGEND_IN + GAP) / fig_h,
-    (FIG_W - M_LEFT - M_RIGHT) / FIG_W,
+    axes_w / FIG_W,
     axes_h / fig_h,
 ])
 
