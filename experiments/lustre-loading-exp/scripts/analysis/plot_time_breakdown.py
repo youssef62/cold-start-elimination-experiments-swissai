@@ -24,7 +24,29 @@ phases = [
 
 total = sum(d for _, d, _ in phases)
 
-fig, ax = plt.subplots(figsize=(9, 4.2))
+# --- shared bar geometry (keep identical to plot_overlap_breakdown.py) ---
+# scale = ROW_IN / LANE_DATA inches per data unit; bar thickness in inches is
+# BAR_H * scale, so both figures render bars at the same thickness.
+LANE_DATA = 0.9
+BAR_H = 0.34
+ROW_IN = 0.85
+SCALE = ROW_IN / LANE_DATA
+
+YLIM = 0.26
+
+FIG_W = 9.0
+M_TOP, M_LEFT, M_RIGHT, M_BOT = 0.5, 0.18, 0.15, 0.10
+GAP, LEGEND_IN = 0.12, 0.78
+
+axes_h = 2 * YLIM * SCALE
+fig_h = M_TOP + axes_h + GAP + LEGEND_IN + M_BOT
+fig = plt.figure(figsize=(FIG_W, fig_h))
+ax = fig.add_axes([
+    M_LEFT / FIG_W,
+    (M_BOT + LEGEND_IN + GAP) / fig_h,
+    (FIG_W - M_LEFT - M_RIGHT) / FIG_W,
+    axes_h / fig_h,
+])
 
 # only inline-label the one segment wide enough to hold its name comfortably;
 # everything else is carried by the legend below, to avoid any clipped text.
@@ -32,7 +54,7 @@ INLINE_LABEL_MIN_PCT = 30
 
 left = 0.0
 for name, dur, color in phases:
-    ax.barh(0, dur, left=left, height=0.6, color=color,
+    ax.barh(0, dur, left=left, height=BAR_H, color=color,
             edgecolor="white", linewidth=1.2)
     pct = dur / total * 100
     if pct >= INLINE_LABEL_MIN_PCT:
@@ -41,20 +63,18 @@ for name, dur, color in phases:
     left += dur
 
 ax.set_xlim(0, total)
-ax.set_ylim(-0.6, 0.6)
+ax.set_ylim(-YLIM, YLIM)
 ax.set_yticks([])
-ax.set_xlabel("time (s)", labelpad=8)
-ax.spines["top"].set_visible(False)
-ax.spines["right"].set_visible(False)
-ax.spines["left"].set_visible(False)
-ax.set_title(f"Baseline cold start time breakdown, total {total:.1f}s", pad=14)
+ax.set_xticks([])
+for s in ("top", "right", "left", "bottom"):
+    ax.spines[s].set_visible(False)
+ax.set_title(f"Baseline cold start time breakdown, total {total:.1f}s", pad=12)
 
 legend_handles = [plt.Rectangle((0, 0), 1, 1, color=c) for _, _, c in phases]
 legend_labels = [f"{n} ({d:g}s, {d/total*100:.1f}%)" for n, d, _ in phases]
-ax.legend(legend_handles, legend_labels, loc="upper center",
-          bbox_to_anchor=(0.5, -0.85), ncol=3, frameon=False, fontsize=8.5,
-          columnspacing=1.2, handletextpad=0.6, labelspacing=1.1)
+fig.legend(legend_handles, legend_labels, loc="lower center",
+           bbox_to_anchor=(0.5, M_BOT / fig_h), ncol=3, frameon=False, fontsize=8.5,
+           columnspacing=1.2, handletextpad=0.6, labelspacing=0.9)
 
-fig.subplots_adjust(bottom=0.55, top=0.82)
 fig.savefig("time_breakdown.png", dpi=200)
 print("wrote time_breakdown.png")

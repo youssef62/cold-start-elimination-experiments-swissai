@@ -132,6 +132,8 @@ Equipped with this knowledge, we try the following:
 
 * This idea is possible because each node in both our clusters (Bristen and Clariden) has more RAM than GPU RAM. This means a node's specific shard of weights can always be stored in RAM if we preshard the weights across nodes. This is what we do next. We use `--load-format sharded_state`, which lets us save our weights by their TP rank. One added benefit is that our weights are now contiguous for each rank, which speeds up our H2D reads (see below). 
 
+* Additionally, we can overlap the staging with the SGLang server launch. This is possible because the first steps (`process_startup`, `tp_worker_spawn`, `torch_distributed_init`) do not need the weights. We can start staging to `/dev/shm` while the server is still in `process_startup`. This is what I report below as **/dev/shm staging + presharded + overlap**.
+
 * Staging to `/dev/shm` is better than warming up the page cache for models that don't fit in a single node. For these, to warm all the weights a rank needs, we would need to fill the page cache with all weights of the model which don't fit in the RAM. 
 
 * Staging to `/dev/shm` is different from using `--weight-loader-disable-mmap` in two ways. 
@@ -150,8 +152,17 @@ Equipped with this knowledge, we try the following:
 | /dev/shm + TP-presharded | 8.8 + 7.4 (stage) | 28.0× | 170.8 |
 | /dev/shm staging + presharded + overlap | 9.7 | 47.0× | 179.0 |
 
+
+
 * To avoid corrupting our results with any kind of caching, we run the methods in **reverse order** of expected speed and on different nodes, meaning `/dev/shm + presharded + overlap` ran before the default loader experiment. 
 * Similarly to the previous section, these results are highly variable, so we provide 3 runs of each experiment (conducted on different days) in [this document](experiments/lustre-loading-exp/results/phase_stats.md) with statistics (mean, stddev, min, max).
+
+Here's the current breakdown of the cold start of our best method, **/dev/shm staging + presharded + overlap**. The weight loading is not the bottleneck anymore, the cuda graph capture is. 
+
+<div align="center">
+  <img src="assets/overlap_breakdown.png" alt="Cold start phase breakdown for the /dev/shm staging + presharded + overlap arm, with the staging shown as a separate bar underneath that finishes while the engine is still in process_startup" width="85%">
+</div>
+
 
 > ⚠️ **Warning.** We notice that, in general, `--cpus-per-task` can have a large impact on weight loading speed. The experiments above were all run with `--cpus-per-task=128`, i.e. on a full node. Here are **--weight-loader-disable-mmap** and the **/dev/shm staging + presharded + overlap** swept over the CPU budget:
 >
