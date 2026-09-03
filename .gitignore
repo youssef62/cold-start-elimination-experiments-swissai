@@ -2,5 +2,4 @@ __pycache__/
 *.pyc
 core_*
 *.log
-experiments/servekit-eval/results/
 blog.pdf

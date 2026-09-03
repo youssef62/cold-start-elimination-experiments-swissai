@@ -1,0 +1,139 @@
+{
+  "passed": true,
+  "per_prompt": [
+    {
+      "key": "capital_of_france",
+      "status": "ok",
+      "n_tokens": 5,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "ok"
+    },
+    {
+      "key": "fibonacci_code",
+      "status": "ok",
+      "n_tokens": 18,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "ok"
+    },
+    {
+      "key": "arithmetic",
+      "status": "ok",
+      "n_tokens": 27,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "ok"
+    },
+    {
+      "key": "primes",
+      "status": "ok",
+      "n_tokens": 23,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "ok"
+    },
+    {
+      "key": "thermodynamics",
+      "status": "ok",
+      "n_tokens": 14,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "ok"
+    },
+    {
+      "key": "french",
+      "status": "ok",
+      "n_tokens": 20,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "ok"
+    },
+    {
+      "key": "german",
+      "status": "ok",
+      "n_tokens": 16,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "ok"
+    },
+    {
+      "key": "unicode",
+      "status": "ok",
+      "n_tokens": 34,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "ok"
+    },
+    {
+      "key": "json_schema",
+      "status": "ok",
+      "n_tokens": 22,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "-"
+    },
+    {
+      "key": "sql",
+      "status": "ok",
+      "n_tokens": 29,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "-"
+    },
+    {
+      "key": "repetition",
+      "status": "ok",
+      "n_tokens": 24,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "-"
+    },
+    {
+      "key": "rare_tokens",
+      "status": "ok",
+      "n_tokens": 26,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "-"
+    },
+    {
+      "key": "dialogue",
+      "status": "ok",
+      "n_tokens": 21,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "-"
+    },
+    {
+      "key": "chess",
+      "status": "ok",
+      "n_tokens": 48,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "-"
+    },
+    {
+      "key": "numbers",
+      "status": "ok",
+      "n_tokens": 62,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "-"
+    },
+    {
+      "key": "long_prose",
+      "status": "ok",
+      "n_tokens": 764,
+      "max_token_delta": 0.0,
+      "nll_delta": 0.0,
+      "greedy": "-"
+    }
+  ],
+  "failures": [],
+  "worst_token_delta": 0.0,
+  "worst_nll_delta": 0.0,
+  "model_warning": null,
+  "token_tol": 1e-06,
+  "nll_tol": 1e-06
+}

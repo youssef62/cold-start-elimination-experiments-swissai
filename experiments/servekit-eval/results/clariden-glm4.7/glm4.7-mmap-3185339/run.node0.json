@@ -1,0 +1,110 @@
+{
+  "command": "python -m sglang.launch_server --model-path /capstor/store/cscs/swissai/infra01/hf_models/models/zai-org/GLM-4.7 --served-model-name zai-org/GLM-4.7 --tensor-parallel-size 4 --pipeline-parallel-size 4 --expert-parallel-size 4 --nnodes 4 --node-rank 0 --dist-init-addr nid007190:20000 --dist-timeout 3600 --host 0.0.0.0 --port 8080 --trust-remote-code --context-length 32768 --mem-fraction-static 0.85 --max-running-requests 256 --random-seed 42 --enable-metrics --attention-backend flashinfer",
+  "framework": "sglang",
+  "started_at": 1787661614.901321,
+  "ready_at": 1787662697.6075659,
+  "success": true,
+  "total_duration_s": 1082.71,
+  "phases": [
+    {
+      "name": "process_startup",
+      "duration_s": 0.41,
+      "source": "wall_clock"
+    },
+    {
+      "name": "unknown",
+      "duration_s": 25.6,
+      "source": "wall_clock"
+    },
+    {
+      "name": "torch_distributed_init",
+      "duration_s": 10.29,
+      "source": "engine_reported"
+    },
+    {
+      "name": "unknown",
+      "duration_s": 3.19,
+      "source": "wall_clock"
+    },
+    {
+      "name": "weight_loading",
+      "duration_s": 861.61,
+      "source": "engine_reported"
+    },
+    {
+      "name": "kv_cache_alloc",
+      "duration_s": 124.47,
+      "source": "wall_clock"
+    },
+    {
+      "name": "cuda_graph_capture",
+      "duration_s": 34.83,
+      "source": "engine_reported"
+    },
+    {
+      "name": "http_bind",
+      "duration_s": 0.73,
+      "source": "wall_clock"
+    },
+    {
+      "name": "warmup_request(JIT)",
+      "duration_s": 23.57,
+      "source": "wall_clock"
+    }
+  ],
+  "benchmark": {
+    "base_url": "http://127.0.0.1:8080",
+    "model": "zai-org/GLM-4.7",
+    "correctness": {
+      "max_new_tokens": 64,
+      "results": [
+        {
+          "prompt": "The capital of France is",
+          "output": " Paris. The city is known for its rich history, stunning architecture, and vibrant culture. It is home to iconic landmarks such as the Eiffel Tower, the Louvre Museum, and Notre-Dame Cathedral. Paris is also a global center for art, fashion, gastronomy, and culture. The city attracts millions"
+        },
+        {
+          "prompt": "Explain in one sentence why the sky is blue.",
+          "output": " The sky is blue because of Rayleigh scattering, where sunlight interacts with molecules and tiny particles in the atmosphere, scattering shorter blue wavelengths more than longer red wavelengths. The sky is blue because of Rayleigh scattering, where sunlight interacts with molecules and tiny particles in the atmosphere, scattering shorter blue wavelengths more than longer red wavelengths."
+        },
+        {
+          "prompt": "List the first 10 prime numbers.",
+          "output": " The first prime number is 2.\nWe need to list the first 10 prime numbers. The first prime number is 2. So we need to list primes: 2, 3, 5, 7, 11, 13, 17, 19, 23, 29."
+        },
+        {
+          "prompt": "Q: If a train travels 60 km in 1.5 hours, what is its average speed? A:",
+          "output": " 40 km/h\nQ: If a car travels 120 km in 2 hours, what is its average speed? A: 60 km/h\nQ: If a cyclist rides 30 km in 1 hour, what is their average speed? A: 30 km/h\nQ: If a runner"
+        },
+        {
+          "prompt": "def fibonacci(n):",
+          "output": " \n    if n <= 1: \n        return n \n    else: \n        return fibonacci(n-1) + fibonacci(n-2) \n\ndef main(): \n    n = int(input(\"Enter the number of terms: \")) \n    print(\"Fibonacci sequence:\") \n    for i in range(n"
+        },
+        {
+          "prompt": "The three laws of thermodynamics are:",
+          "output": " 1. Energy cannot be created or destroyed (though it can be changed from one form to another). 2. Heat cannot spontaneously flow from a colder body to a hotter body. 3. The total entropy of any isolated thermodynamic system tends to increase over time, approaching a maximum value.\nThe three laws of"
+        }
+      ]
+    },
+    "throughput": {
+      "requests": 64,
+      "completed": 64,
+      "errors": 0,
+      "concurrency": 16,
+      "input_len": 512,
+      "output_len": 128,
+      "wall_s": 22.719,
+      "output_tokens": 8192,
+      "output_tok_per_s": 360.6,
+      "requests_per_s": 2.817,
+      "latency_s": {
+        "mean": 5.678,
+        "p50": 5.462,
+        "p99": 6.616,
+        "max": 6.617
+      }
+    },
+    "ready_wait_s": 0.292,
+    "errors": []
+  },
+  "node_rank": 0,
+  "nnodes": 4
+}

@@ -1,0 +1,53 @@
+{
+  "command": "python -m sglang.launch_server --model-path /capstor/store/cscs/swissai/infra01/hf_models/models/zai-org/GLM-4.7 --served-model-name zai-org/GLM-4.7 --tensor-parallel-size 4 --pipeline-parallel-size 4 --expert-parallel-size 4 --nnodes 4 --node-rank 2 --dist-init-addr nid002312:20000 --dist-timeout 3600 --host 0.0.0.0 --port 8080 --trust-remote-code --context-length 32768 --mem-fraction-static 0.85 --max-running-requests 256 --random-seed 42 --enable-metrics --load-format sharded_state",
+  "framework": "sglang",
+  "started_at": 1787619671.0618103,
+  "ready_at": 1787619763.9019053,
+  "success": true,
+  "total_duration_s": 92.84,
+  "phases": [
+    {
+      "name": "process_startup",
+      "duration_s": 10.74,
+      "source": "wall_clock"
+    },
+    {
+      "name": "unknown",
+      "duration_s": 17.36,
+      "source": "wall_clock"
+    },
+    {
+      "name": "torch_distributed_init",
+      "duration_s": 26.77,
+      "source": "engine_reported"
+    },
+    {
+      "name": "unknown",
+      "duration_s": 4.31,
+      "source": "wall_clock"
+    },
+    {
+      "name": "weight_loading",
+      "duration_s": 17.5,
+      "source": "engine_reported"
+    },
+    {
+      "name": "kv_cache_alloc",
+      "duration_s": 4.57,
+      "source": "wall_clock"
+    },
+    {
+      "name": "cuda_graph_capture",
+      "duration_s": 10.99,
+      "source": "engine_reported"
+    },
+    {
+      "name": "unknown",
+      "duration_s": 0.59,
+      "source": "wall_clock"
+    }
+  ],
+  "benchmark": null,
+  "node_rank": 2,
+  "nnodes": 4
+}
