@@ -43,7 +43,7 @@ OUT="${OUT:-/capstor/store/cscs/swissai/infra01/cold-start-experiments/llama70b-
 LOAD_FORMAT="${LOAD_FORMAT:-fastsafetensors}"
 
 EXP_DIR="${SLURM_SUBMIT_DIR}/experiments/lustre-loading-exp/scripts/methods"
-EDF="${SLURM_SUBMIT_DIR}/examples/profile/llama-3.1-70b-bristen/llama-3.1-70b-sglang.toml"
+EDF="${SLURM_SUBMIT_DIR}/edf/llama-3.1-70b-sglang.toml"
 TP_SIZE=4
 MAX_MODEL_LEN=32768
 MEM_FRACTION_STATIC=0.85

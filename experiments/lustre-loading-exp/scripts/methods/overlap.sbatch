@@ -67,7 +67,7 @@ SLICES="${SLICES:-64}"
 SHM_DEST="${SHM_DEST:-/dev/shm/llama70b}"
 
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-meta-llama/Llama-3.1-70B-Instruct}"
-EDF="${EDF:-${SLURM_SUBMIT_DIR}/examples/profile/llama-3.1-70b-bristen/llama-3.1-70b-sglang.toml}"
+EDF="${EDF:-${SLURM_SUBMIT_DIR}/edf/llama-3.1-70b-sglang.toml}"
 SERVEKIT_DIR="${SERVEKIT_DIR:-/iopsstor/scratch/cscs/yboughizane/cold-start-elimination/servekit-main}"
 LUSTRE_EXP_DIR="${SLURM_SUBMIT_DIR}/experiments/lustre-loading-exp"
 RESULTS_DIR="${RESULTS_DIR:-${LUSTRE_EXP_DIR}/results/methods/overlap}"

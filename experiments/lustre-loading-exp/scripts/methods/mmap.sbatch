@@ -23,7 +23,7 @@ set -euo pipefail
 
 MODEL="${MODEL:-/capstor/store/cscs/swissai/infra01/hf_models/models/meta-llama/Llama-3.1-70B-Instruct}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-meta-llama/Llama-3.1-70B-Instruct}"
-EDF="${EDF:-${SLURM_SUBMIT_DIR}/examples/profile/llama-3.1-70b-bristen/llama-3.1-70b-sglang.toml}"
+EDF="${EDF:-${SLURM_SUBMIT_DIR}/edf/llama-3.1-70b-sglang.toml}"
 SERVEKIT_DIR="${SERVEKIT_DIR:-/iopsstor/scratch/cscs/yboughizane/cold-start-elimination/servekit-main}"
 SGLANG_PORT=8080
 TP_SIZE=4

@@ -28,7 +28,7 @@ RES_ABS="$(cd "$RES" && pwd -P)"
 
 MODEL=/capstor/store/cscs/swissai/infra01/hf_models/models/meta-llama/Llama-3.1-70B-Instruct
 SERVED_MODEL_NAME=meta-llama/Llama-3.1-70B-Instruct
-EDF="$(pwd -P)/examples/profile/llama-3.1-70b-bristen/llama-3.1-70b-sglang.toml"
+EDF="$(pwd -P)/edf/llama-3.1-70b-sglang.toml"
 
 USED="${EXCLUDE_NODES:-}"
 

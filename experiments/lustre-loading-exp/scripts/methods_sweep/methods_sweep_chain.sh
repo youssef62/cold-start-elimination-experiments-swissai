@@ -39,14 +39,14 @@ case "$MODEL" in
     NATIVE_SRC=/capstor/store/cscs/swissai/infra01/hf_models/models/meta-llama/Llama-3.1-70B-Instruct
     SHARDED_SRC=/capstor/store/cscs/swissai/infra01/cold-start-experiments/llama70b-tp4-sharded
     SERVED_MODEL_NAME=meta-llama/Llama-3.1-70B-Instruct
-    EDF="$(pwd -P)/examples/profile/llama-3.1-70b-bristen/llama-3.1-70b-sglang.toml"
+    EDF="$(pwd -P)/edf/llama-3.1-70b-sglang.toml"
     SHM_DEST=/dev/shm/llama70b
     ;;
   apertus8b)
     NATIVE_SRC=/capstor/store/cscs/swissai/infra01/hf_models/models/swiss-ai/Apertus-8B-Instruct-2509
     SHARDED_SRC=/capstor/store/cscs/swissai/infra01/cold-start-experiments/apertus8b-tp4-sharded
     SERVED_MODEL_NAME=swiss-ai/Apertus-8B-Instruct-2509
-    EDF="$(pwd -P)/examples/profile/apertus-8b-bristen/apertus-8b-sglang.toml"
+    EDF="$(pwd -P)/edf/apertus-8b-sglang.toml"
     SHM_DEST=/dev/shm/apertus8b
     ;;
   *) echo "unknown MODEL=$MODEL (want llama70b or apertus8b)" >&2; exit 1 ;;

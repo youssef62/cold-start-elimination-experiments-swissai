@@ -80,7 +80,7 @@ arm), each via its own sbatch script under `scripts/methods/`:
   engine startup instead of before it
 
 All arms share the SGLang container EDF at
-[`examples/profile/llama-3.1-70b-bristen/llama-3.1-70b-sglang.toml`](../../examples/profile/llama-3.1-70b-bristen/llama-3.1-70b-sglang.toml),
+[`edf/llama-3.1-70b-sglang.toml`](../../edf/llama-3.1-70b-sglang.toml),
 and expect a `servekit` checkout at
 `/iopsstor/scratch/cscs/yboughizane/cold-start-elimination/servekit-main`
 (override with `SERVEKIT_DIR`) — see the

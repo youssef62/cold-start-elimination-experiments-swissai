@@ -28,7 +28,7 @@ RES_ABS="$(cd "$RES" && pwd -P)"
 
 SHARDED_SRC="${SHARDED_SRC:-/capstor/store/cscs/swissai/infra01/cold-start-experiments/llama70b-tp4-sharded}"
 SERVED_MODEL_NAME=meta-llama/Llama-3.1-70B-Instruct
-EDF="$(pwd -P)/examples/profile/llama-3.1-70b-bristen/llama-3.1-70b-sglang.toml"
+EDF="$(pwd -P)/edf/llama-3.1-70b-sglang.toml"
 
 USED="${EXCLUDE_NODES:-}"
 
