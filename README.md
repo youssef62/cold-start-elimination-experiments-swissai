@@ -237,7 +237,10 @@ This sweep uses SGLang v0.5.16 (image `lmsysorg/sglang:v0.5.16`).
 
   Here are the bugs I discovered that I raised to the SGLang team: 
     - [mxfp4 + sharded_state load format silently drops expert weights (gpt-oss-20b)](https://github.com/sgl-project/sglang/issues/34448) (#34448)
+      - Relevant for Kimi-K3
     - [`sharded_state` cannot save and load an MLA model](https://github.com/sgl-project/sglang/issues/35702) (#35702)
+      - Relevant for GLM-5.x models. 
+      - `servekit` now patches sglang to fix this issue, but it is not a permanent solution.
 
   We are also involved in fixes for these: 
     - [Manually register kv_b_proj to attn_mha so mla model work with ShardedModelLoader](https://github.com/sgl-project/sglang/pull/35715) (#35715)
