@@ -27,8 +27,9 @@ This post walks through our cold start elimination experiments for SwissAI model
 - [III. JIT Compilation](#iii-jit-compilation)
 - [IV. CUDA Graphs](#iv-cuda-graphs)
 - [V. CRIU](#v-criu)
-  - [1. CSCS](#cscs)
-  - [2. Local results](#local-results)
+  - [CSCS](#cscs)
+  - [Local results](#local-results)
+- [VI. Future Directions](#vi-future-directions)
 
 
 ## I. Time Breakdown
@@ -404,6 +405,21 @@ We could work around this at the application level. We would need to patch SGLan
 | **TP > 1** | - Restore 4.6× faster (**19.8s vs 91.2s**) | - Requires `CAP_NET_ADMIN` additionally to preserve the NCCL connectionn.<br> - Otherwise, would need patching SGLang to destroy the process group, then rebuild it **along with Cuda Graphs**.  |
 
 > **Lesson.** Local CRIU checkpoint/restore show promising speedups. Multi-GPU setups require `CAP_NET_ADMIN` to preserve NCCL connections. 
+
+
+## VI. Future Directions
+
+**Servekit**
+
+- Continue patching the issues in sglang related to `ShardedStateLoader`.  
+  - To solve [`sharded_state` cannot save and load an MLA model](https://github.com/sgl-project/sglang/issues/35702) we proposed [Manually register kv_b_proj to attn_mha so mla model work with ShardedModelLoader](https://github.com/sgl-project/sglang/pull/35715) (#35715). However, waiting until this is merged and released is not ideal. [We patched in servekit](https://github.com/eth-easl/servekit/blob/main/src/servekit/_patches/sglang_35715.py) so GLM5.x models work. 
+  - We'd need to do the same for the mxfp4 issue ([#34448](https://github.com/sgl-project/sglang/issues/34448)) to enable Kimi-K3. 
+- Understand the inner workings of the VAST datastore that powers the upcoming SwissAI serving platform, but only for CSCS's inference serving and RCP, to understand whether we can expect `servekit` to improve performance there or not. We should also try out `servekit` on it.
+- The current correctness check in `servekit verify` is important to our workflow as it guarantees that `servekit` does not corrupt the models, which it could if its dependencies expose bugs (e.g. `ShardedStateLoader`). The current checks verify that logprobs are equal up to `1e-6` and that the greedy generation is the same. This might be too strict for some low precision models (e.g. fp4 for Kimi-K3). We should study nondeterminism sources in these models and advise on whether to relax the correctness checks or not. It's also important that we do not lightly relax the correctness checks, as this could lead to silent corruption of the models further down the line.
+
+**General cold start**
+- CRIU checkpoint/restore is promising, but requires privileges that we do not have on HPC platforms. Finding an alternative that works in HPC environments would be very useful but also challenging.
+
 
 [^1]: A threadpool of size 8 is used to do mmap in parallel. 
 
